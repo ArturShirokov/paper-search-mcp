@@ -30,6 +30,7 @@ from .academic_platforms.doaj import DOAJSearcher
 from .academic_platforms.europepmc import EuropePMCSearcher
 from .academic_platforms.google_scholar import GoogleScholarSearchError, GoogleScholarSearcher
 from .academic_platforms.hal import HALSearcher
+from .academic_platforms.chinarxiv import ChinaRxivSearcher
 from .academic_platforms.iacr import IACRSearcher
 from .academic_platforms.medrxiv import MedRxivSearcher
 from .academic_platforms.openaire import OpenAiresearcher
@@ -113,6 +114,7 @@ unpaywall_resolver = UnpaywallResolver()
 unpaywall_searcher = UnpaywallSearcher(resolver=unpaywall_resolver)
 zenodo_searcher = ZenodoSearcher()
 hal_searcher = HALSearcher()
+chinarxiv_searcher = ChinaRxivSearcher()
 ssrn_searcher = SSRNSearcher()
 openreview_searcher = OpenReviewSearcher()
 # scihub_searcher = SciHubSearcher()
@@ -206,6 +208,7 @@ ALL_SOURCES = [
     "base",
     "zenodo",
     "hal",
+    "chinarxiv",
     "ssrn",
     "openreview",
     "unpaywall",
@@ -587,7 +590,7 @@ async def search_papers(
         query: Search query string.
         max_results_per_source: Max results to fetch from each selected source.
         sources: Comma-separated source names or 'all'.
-            Available: arxiv,pubmed,biorxiv,medrxiv,google_scholar,iacr,semantic,crossref,openalex,pmc,core,europepmc,dblp,openaire,citeseerx,doaj,base,zenodo,hal,ssrn,openreview,unpaywall
+            Available: arxiv,pubmed,biorxiv,medrxiv,google_scholar,iacr,semantic,crossref,openalex,pmc,core,europepmc,dblp,openaire,citeseerx,doaj,base,zenodo,hal,chinarxiv,ssrn,openreview,unpaywall
         year: Optional year filter for Semantic Scholar only.
     Returns:
         Aggregated dictionary with per-source stats, errors, and deduplicated papers.
@@ -650,6 +653,8 @@ async def search_papers(
             task_map[source] = search_zenodo(query, max_results_per_source)
         elif source == "hal":
             task_map[source] = search_hal(query, max_results_per_source)
+        elif source == "chinarxiv":
+            task_map[source] = search_chinarxiv(query, max_results_per_source)
         elif source == "openreview":
             task_map[source] = search_openreview(query, max_results_per_source)
         elif source == "ssrn":
@@ -1175,7 +1180,7 @@ async def download_with_fallback(
     """Try source-native download, OA repositories, Unpaywall, then optional Sci-Hub.
 
     Args:
-        source: Source name (arxiv, biorxiv, medrxiv, iacr, semantic, crossref, pubmed, pmc, core, europepmc, citeseerx, doaj, base, zenodo, hal, ssrn).
+        source: Source name (arxiv, biorxiv, medrxiv, iacr, semantic, crossref, pubmed, pmc, core, europepmc, citeseerx, doaj, base, zenodo, hal, chinarxiv, ssrn).
         paper_id: Source-native paper identifier.
         doi: Optional DOI used for repository/unpaywall/Sci-Hub fallback.
         title: Optional title used for repository/Sci-Hub fallback when DOI is unavailable.
@@ -1203,6 +1208,7 @@ async def download_with_fallback(
         "base": base_searcher.download_pdf,
         "zenodo": zenodo_searcher.download_pdf,
         "hal": hal_searcher.download_pdf,
+        "chinarxiv": chinarxiv_searcher.download_pdf,
         "ssrn": ssrn_searcher.download_pdf,
         "openreview": openreview_searcher.download_pdf,
     }
@@ -1548,6 +1554,56 @@ async def search_hal(query: str, max_results: int = 10) -> List[Dict]:
     """
     papers = await async_search(hal_searcher, query, max_results)
     return papers if papers else []
+
+
+@mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
+async def search_chinarxiv(query: str, max_results: int = 10, corpus: str = "chinaxiv") -> List[Dict]:
+    """Search ChinaRxiv: English machine translations of ChinaXiv preprints.
+
+    Args:
+        query: Search query in English (records are translated).
+        max_results: Maximum number of papers to return (default: 10).
+        corpus: 'chinaxiv' (Chinese preprints) or 'russiarxiv' (Soviet-era papers).
+    """
+    return await async_search(chinarxiv_searcher, query, max_results, corpus=corpus)
+
+
+@mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
+async def list_new_chinarxiv(since: str, max_results: int = 100, corpus: str = "chinaxiv") -> List[Dict]:
+    """List ChinaRxiv papers published since a date.
+
+    Translations trail ChinaXiv by weeks and the filter uses the original
+    publication date, so look back about a month and dedupe locally.
+
+    Args:
+        since: Date in YYYY-MM-DD format.
+        max_results: Maximum number of records to return (default: 100).
+        corpus: 'chinaxiv' or 'russiarxiv'.
+    """
+    papers = await asyncio.to_thread(chinarxiv_searcher.list_new, since, max_results, corpus)
+    return [paper.to_dict() for paper in papers]
+
+
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": True, "openWorldHint": True})
+async def download_chinarxiv(paper_id: str, save_path: str = "./downloads") -> str:
+    """Download the English PDF of a ChinaRxiv paper.
+
+    Args:
+        paper_id: ChinaRxiv ID, e.g. 'chinaxiv-202609.00292'.
+        save_path: Directory to save the PDF (default: './downloads').
+    """
+    return chinarxiv_searcher.download_pdf(paper_id, save_path)
+
+
+@mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
+async def read_chinarxiv_paper(paper_id: str, save_path: str = "./downloads") -> str:
+    """Return the translated full text of a ChinaRxiv paper as Markdown.
+
+    Args:
+        paper_id: ChinaRxiv ID, e.g. 'chinaxiv-202609.00292'.
+        save_path: Unused; kept for a uniform read_* signature.
+    """
+    return await asyncio.to_thread(chinarxiv_searcher.read_paper, paper_id, save_path)
 
 
 @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})

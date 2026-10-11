@@ -60,7 +60,7 @@ Enable it with `--auth oauth` or `PAPER_SEARCH_MCP_AUTH=oauth` and the explicit 
 - **Two-Layer Architecture**:
   - **Layer 1 (Unified Tooling)**: High-level `search_papers` for multi-source concurrent search & deduplication, and `download_with_fallback` relying on publisher open access links with sequential fallbacks.
   - **Layer 2 (Platform Connectors)**: Modular connectors for specific academic platforms (arXiv, PubMed, bioRxiv, Semantic Scholar, etc.) equipped with intelligent DOI extraction via regex text analysis or API fields.
-- **Multi-Source Support**: Search and download papers from arXiv, PubMed, bioRxiv, medRxiv, Google Scholar, IACR ePrint Archive, Semantic Scholar, Crossref, OpenAlex, PubMed Central (PMC), CORE, Europe PMC, dblp, OpenAIRE, CiteSeerX, DOAJ, BASE, Zenodo, HAL, SSRN, OpenReview, Unpaywall (DOI lookup), and optional Sci-Hub workflows.
+- **Multi-Source Support**: Search and download papers from arXiv, PubMed, bioRxiv, medRxiv, Google Scholar, IACR ePrint Archive, Semantic Scholar, Crossref, OpenAlex, PubMed Central (PMC), CORE, Europe PMC, dblp, OpenAIRE, CiteSeerX, DOAJ, BASE, Zenodo, HAL, ChinaRxiv, SSRN, OpenReview, Unpaywall (DOI lookup), and optional Sci-Hub workflows.
 - **Opt-in Fast Search**: CLI search keeps broad coverage by default. Use `-s fast` (OpenAlex, Crossref, arXiv, PubMed, Europe PMC) or `-s fastest` (OpenAlex and Crossref) when lower latency matters more than coverage.
 - **Standardized Output**: Papers are returned in a consistent dictionary format via the `Paper` class.
 - **Free-First Design**: Open and public sources are prioritized before any optional commercial or restricted integrations.
@@ -114,6 +114,7 @@ This matrix reflects **verified live-integration results** from functional and e
 | BASE | ⚠️ | ✅ (record-dependent) | ✅ (record-dependent) | OAI-PMH endpoint requires institutional IP registration; returns empty gracefully otherwise |
 | Zenodo | ✅ | ✅ (record-dependent) | ✅ (record-dependent) | Open API; reliable |
 | HAL | ✅ | ✅ (record-dependent) | ✅ (record-dependent) | Open API; reliable |
+| ChinaRxiv | ✅ | ✅ (record-dependent) | ✅ (translated Markdown) | English machine translations of ChinaXiv, plus SovietRxiv (`corpus=russiarxiv`); keyless, set `CHINARXIV_EMAIL` for 10x rate limit; trails ChinaXiv by weeks |
 | SSRN | ✅ (OpenAlex metadata) | ⚠️ best-effort | ⚠️ best-effort | Public discovery verified; SSRN page/PDF identity must be verified separately |
 | OpenReview | ✅ (anonymous API v2) | ⚠️ public-only | ⚠️ public-only | Search verified; exact-note lookup returned 403 in live PDF check; PDF success is mock-tested only |
 | Unpaywall | ✅ (DOI lookup) | ❌ | ❌ | **Requires** `PAPER_SEARCH_MCP_UNPAYWALL_EMAIL` |
@@ -233,6 +234,7 @@ Additional public-source connectors are integrated into the MCP server:
 
 - `zenodo`: Official Zenodo REST API connector (search + record-dependent PDF/read support).
 - `hal`: HAL public API connector (search + record-dependent PDF/read support).
+- `chinarxiv`: ChinaRxiv API connector (search, `list_new_chinarxiv(since, corpus)`, English PDF, full text as Markdown). Records are machine-translated; `extra.original_url` links the ChinaXiv original and `extra.abstract_source == "machine_generated"` marks model-written abstracts.
 - `ssrn`: [OpenAlex-backed discovery](docs/SSRN_OPENALEX.md) with strict SSRN identity and validated best-effort public downloads.
 - `openreview`: [Anonymous public API v2 papers](docs/OPENREVIEW.md), excluding reviews/private notes; verified OpenReview-hosted PDF download/read.
 - `unpaywall`: DOI-centric OA metadata source for standalone lookup (`search_unpaywall`) and fallback URL resolution.
