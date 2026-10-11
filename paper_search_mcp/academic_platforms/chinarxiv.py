@@ -12,6 +12,7 @@ API docs: https://chinarxiv.org/api/docs (CC BY 4.0, no key required)
 from __future__ import annotations
 
 import os
+import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -91,9 +92,13 @@ class ChinaRxivSearcher(PaperSource):
 
     def _parse(self, record: Dict[str, Any]) -> Paper:
         paper_id = record["id"]
-        # ponytail: authors arrive as one comma-joined string; "Last, First" names would split wrongly.
-        parts = (a.strip() for entry in record.get("authors") or [] for a in entry.split(","))
-        authors = [a[4:] if a.startswith("and ") else a for a in parts if a]
+        authors = [a for a in record.get("authors") or [] if a]
+        if len(authors) == 1:
+            # A single entry is a comma-joined list ("A, B, and C et al.");
+            # several entries are one person each, sometimes "Surname, Given".
+            # ponytail: a lone "Surname, Given" author still splits in two.
+            joined = re.sub(r"\s+et al\.?$", "", authors[0])
+            authors = [re.sub(r"^and ", "", a.strip()) for a in joined.split(",") if a.strip()]
         date = record.get("date") or ""
         try:
             published = datetime.strptime(date, "%Y-%m-%d")

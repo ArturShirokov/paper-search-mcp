@@ -168,3 +168,11 @@ def test_validation_error_keeps_api_detail(searcher):
 
     with pytest.raises(ValueError, match="Not a valid date"):
         searcher.list_new("2026/09/01")
+
+
+def test_author_list_entries_are_never_split(searcher):
+    paper = searcher._parse(dict(RECORD, authors=["Hong, Jian-Wang", "Hu, Chen-Lu"]))
+    assert paper.authors == ["Hong, Jian-Wang", "Hu, Chen-Lu"]
+
+    paper = searcher._parse(dict(RECORD, authors=["Dong Zhang, Rong-Bing Zhao, Chu-Yuan Zhang et al."]))
+    assert paper.authors == ["Dong Zhang", "Rong-Bing Zhao", "Chu-Yuan Zhang"]
