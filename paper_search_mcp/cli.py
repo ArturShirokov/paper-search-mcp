@@ -37,6 +37,7 @@ from .academic_platforms.base_search import BASESearcher
 from .academic_platforms.unpaywall import UnpaywallResolver, UnpaywallSearcher
 from .academic_platforms.zenodo import ZenodoSearcher
 from .academic_platforms.hal import HALSearcher
+from .academic_platforms.ops import JxivSearcher, SciELOPreprintsSearcher
 from .academic_platforms.ssrn import SSRNSearcher
 from .academic_platforms.openreview import OpenReviewSearcher
 
@@ -82,6 +83,8 @@ def _get_searcher(source: str) -> Any:
         "base": BASESearcher,
         "zenodo": ZenodoSearcher,
         "hal": HALSearcher,
+        "jxiv": JxivSearcher,
+        "scielo_preprints": SciELOPreprintsSearcher,
         "ssrn": SSRNSearcher,
         "openreview": OpenReviewSearcher,
     }
@@ -113,7 +116,7 @@ ALL_SOURCES = [
     "arxiv", "pubmed", "biorxiv", "medrxiv", "google_scholar", "iacr",
     "semantic", "crossref", "openalex", "pmc", "core", "europepmc",
     "dblp", "openaire", "citeseerx", "doaj", "base", "zenodo", "hal",
-    "ssrn", "openreview", "unpaywall",
+    "jxiv", "scielo_preprints", "ssrn", "openreview", "unpaywall",
 ]
 
 FASTEST_SOURCES = [

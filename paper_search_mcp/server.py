@@ -34,6 +34,7 @@ from .academic_platforms.iacr import IACRSearcher
 from .academic_platforms.medrxiv import MedRxivSearcher
 from .academic_platforms.openaire import OpenAiresearcher
 from .academic_platforms.openalex import OpenAlexSearcher
+from .academic_platforms.ops import JxivSearcher, SciELOPreprintsSearcher
 from .academic_platforms.pmc import PMCSearcher
 from .academic_platforms.pubmed import PubMedSearcher
 from .academic_platforms.sci_hub import SciHubFetcher
@@ -113,6 +114,8 @@ unpaywall_resolver = UnpaywallResolver()
 unpaywall_searcher = UnpaywallSearcher(resolver=unpaywall_resolver)
 zenodo_searcher = ZenodoSearcher()
 hal_searcher = HALSearcher()
+jxiv_searcher = JxivSearcher()
+scielo_preprints_searcher = SciELOPreprintsSearcher()
 ssrn_searcher = SSRNSearcher()
 openreview_searcher = OpenReviewSearcher()
 # scihub_searcher = SciHubSearcher()
@@ -206,6 +209,8 @@ ALL_SOURCES = [
     "base",
     "zenodo",
     "hal",
+    "jxiv",
+    "scielo_preprints",
     "ssrn",
     "openreview",
     "unpaywall",
@@ -587,7 +592,7 @@ async def search_papers(
         query: Search query string.
         max_results_per_source: Max results to fetch from each selected source.
         sources: Comma-separated source names or 'all'.
-            Available: arxiv,pubmed,biorxiv,medrxiv,google_scholar,iacr,semantic,crossref,openalex,pmc,core,europepmc,dblp,openaire,citeseerx,doaj,base,zenodo,hal,ssrn,openreview,unpaywall
+            Available: arxiv,pubmed,biorxiv,medrxiv,google_scholar,iacr,semantic,crossref,openalex,pmc,core,europepmc,dblp,openaire,citeseerx,doaj,base,zenodo,hal,jxiv,scielo_preprints,ssrn,openreview,unpaywall
         year: Optional year filter for Semantic Scholar only.
     Returns:
         Aggregated dictionary with per-source stats, errors, and deduplicated papers.
@@ -650,6 +655,10 @@ async def search_papers(
             task_map[source] = search_zenodo(query, max_results_per_source)
         elif source == "hal":
             task_map[source] = search_hal(query, max_results_per_source)
+        elif source == "jxiv":
+            task_map[source] = search_jxiv(query, max_results_per_source)
+        elif source == "scielo_preprints":
+            task_map[source] = search_scielo_preprints(query, max_results_per_source)
         elif source == "openreview":
             task_map[source] = search_openreview(query, max_results_per_source)
         elif source == "ssrn":
@@ -1175,7 +1184,7 @@ async def download_with_fallback(
     """Try source-native download, OA repositories, Unpaywall, then optional Sci-Hub.
 
     Args:
-        source: Source name (arxiv, biorxiv, medrxiv, iacr, semantic, crossref, pubmed, pmc, core, europepmc, citeseerx, doaj, base, zenodo, hal, ssrn).
+        source: Source name (arxiv, biorxiv, medrxiv, iacr, semantic, crossref, pubmed, pmc, core, europepmc, citeseerx, doaj, base, zenodo, hal, jxiv, scielo_preprints, ssrn).
         paper_id: Source-native paper identifier.
         doi: Optional DOI used for repository/unpaywall/Sci-Hub fallback.
         title: Optional title used for repository/Sci-Hub fallback when DOI is unavailable.
@@ -1203,6 +1212,8 @@ async def download_with_fallback(
         "base": base_searcher.download_pdf,
         "zenodo": zenodo_searcher.download_pdf,
         "hal": hal_searcher.download_pdf,
+        "jxiv": jxiv_searcher.download_pdf,
+        "scielo_preprints": scielo_preprints_searcher.download_pdf,
         "ssrn": ssrn_searcher.download_pdf,
         "openreview": openreview_searcher.download_pdf,
     }
@@ -1551,6 +1562,46 @@ async def search_hal(query: str, max_results: int = 10) -> List[Dict]:
 
 
 @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
+async def search_jxiv(query: str, max_results: int = 10) -> List[Dict]:
+    """Search Jxiv, the JST preprint server (Japan). Records are Japanese and/or English."""
+    return await async_search(jxiv_searcher, query, max_results)
+
+
+@mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
+async def list_new_jxiv(since: str, max_results: int = 100) -> List[Dict]:
+    """List Jxiv preprints added or updated since a date, via OAI-PMH.
+
+    Args:
+        since: Date in YYYY-MM-DD format.
+        max_results: Maximum number of records to return (default: 100).
+    Returns:
+        List of paper metadata in dictionary format. Outages raise an error.
+    """
+    papers = await asyncio.to_thread(jxiv_searcher.list_new, since, max_results)
+    return [paper.to_dict() for paper in papers]
+
+
+@mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
+async def search_scielo_preprints(query: str, max_results: int = 10) -> List[Dict]:
+    """Search SciELO Preprints (Latin America). Records are Portuguese, Spanish or English."""
+    return await async_search(scielo_preprints_searcher, query, max_results)
+
+
+@mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
+async def list_new_scielo_preprints(since: str, max_results: int = 100) -> List[Dict]:
+    """List SciELO Preprints added or updated since a date, via OAI-PMH.
+
+    Args:
+        since: Date in YYYY-MM-DD format.
+        max_results: Maximum number of records to return (default: 100).
+    Returns:
+        List of paper metadata in dictionary format. Outages raise an error.
+    """
+    papers = await asyncio.to_thread(scielo_preprints_searcher.list_new, since, max_results)
+    return [paper.to_dict() for paper in papers]
+
+
+@mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
 async def search_openreview(query: str, max_results: int = 10) -> List[Dict]:
     """Search public OpenReview API v2 papers anonymously (0..1000 results).
 
@@ -1796,6 +1847,30 @@ async def download_hal(paper_id: str, save_path: str = "./downloads") -> str:
         str: Path to downloaded PDF.
     """
     return hal_searcher.download_pdf(paper_id, save_path)
+
+
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": True, "openWorldHint": True})
+async def read_jxiv_paper(paper_id: str, save_path: str = "./downloads") -> str:
+    """Read and extract text content from a Jxiv preprint (numeric id or URL)."""
+    return jxiv_searcher.read_paper(paper_id, save_path)
+
+
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": True, "openWorldHint": True})
+async def download_jxiv(paper_id: str, save_path: str = "./downloads") -> str:
+    """Download the PDF of a Jxiv preprint (numeric id or URL)."""
+    return jxiv_searcher.download_pdf(paper_id, save_path)
+
+
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": True, "openWorldHint": True})
+async def read_scielo_preprints_paper(paper_id: str, save_path: str = "./downloads") -> str:
+    """Read and extract text content from a SciELO preprint (numeric id or URL)."""
+    return scielo_preprints_searcher.read_paper(paper_id, save_path)
+
+
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": True, "openWorldHint": True})
+async def download_scielo_preprints(paper_id: str, save_path: str = "./downloads") -> str:
+    """Download the PDF of a SciELO preprint (numeric id or URL)."""
+    return scielo_preprints_searcher.download_pdf(paper_id, save_path)
 
 
 @mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": True, "openWorldHint": True})

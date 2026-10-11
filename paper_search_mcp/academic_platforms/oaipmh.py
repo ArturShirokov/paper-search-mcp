@@ -131,27 +131,12 @@ class OAIPMHSearcher(PaperSource):
                     'resumptionToken': resumption_token
                 }
 
-            # Make OAI-PMH request
-            response = self.session.get(
-                self.base_url,
-                params=request_params,
-                timeout=30
-            )
-            response.raise_for_status()
-
-            # Parse XML response
-            root = ET.fromstring(response.content)
-            if root.tag != f'{{{OAI_NS}}}OAI-PMH':
-                # e.g. BASE's bare <error>Access denied ...</error>
-                raise OAIPMHError('notOAIPMH', ''.join(root.itertext()).strip()[:200])
-
-            # Check for OAI-PMH errors
-            error_elem = root.find(f'.//{{{OAI_NS}}}error')
-            if error_elem is not None:
-                error_code = error_elem.get('code', 'unknown')
-                if error_code == 'noRecordsMatch':
+            try:
+                root = self._oai_request(request_params)
+            except OAIPMHError as e:
+                if e.code == 'noRecordsMatch':
                     break  # a genuine empty result, not a failure
-                raise OAIPMHError(error_code, (error_elem.text or '').strip())
+                raise
 
             # Process records
             records = root.findall(f'.//{{{OAI_NS}}}record')
@@ -187,6 +172,27 @@ class OAIPMHSearcher(PaperSource):
             time.sleep(0.5)
 
         return papers[:max_results]
+
+    def _oai_request(self, params: Dict[str, str]) -> ET.Element:
+        """Send one OAI-PMH request and return the parsed reply.
+
+        Raises:
+            requests.RequestException: the request failed.
+            OAIPMHError: an OAI-PMH error reply, or a non-OAI-PMH reply.
+            xml.etree.ElementTree.ParseError: the reply was not XML.
+        """
+        response = self.session.get(self.base_url, params=params, timeout=30)
+        response.raise_for_status()
+
+        root = ET.fromstring(response.content)
+        if root.tag != f'{{{OAI_NS}}}OAI-PMH':
+            # e.g. BASE's bare <error>Access denied ...</error>
+            raise OAIPMHError('notOAIPMH', ''.join(root.itertext()).strip()[:200])
+
+        error_elem = root.find(f'.//{{{OAI_NS}}}error')
+        if error_elem is not None:
+            raise OAIPMHError(error_elem.get('code', 'unknown'), (error_elem.text or '').strip())
+        return root
 
     def _parse_oai_record(self, record: ET.Element) -> Optional[Paper]:
         """Parse OAI-PMH record to Paper object.
