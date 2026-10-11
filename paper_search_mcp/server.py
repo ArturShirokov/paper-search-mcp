@@ -31,6 +31,7 @@ from .academic_platforms.europepmc import EuropePMCSearcher
 from .academic_platforms.google_scholar import GoogleScholarSearchError, GoogleScholarSearcher
 from .academic_platforms.hal import HALSearcher
 from .academic_platforms.chinarxiv import ChinaRxivSearcher
+from .academic_platforms.cyberleninka import CyberLeninkaSearcher
 from .academic_platforms.iacr import IACRSearcher
 from .academic_platforms.medrxiv import MedRxivSearcher
 from .academic_platforms.openaire import OpenAiresearcher
@@ -120,6 +121,7 @@ jxiv_searcher = JxivSearcher()
 scielo_preprints_searcher = SciELOPreprintsSearcher()
 preprints_ru_searcher = PreprintsRuSearcher()
 chinarxiv_searcher = ChinaRxivSearcher()
+cyberleninka_searcher = CyberLeninkaSearcher()
 ssrn_searcher = SSRNSearcher()
 openreview_searcher = OpenReviewSearcher()
 # scihub_searcher = SciHubSearcher()
@@ -217,6 +219,7 @@ ALL_SOURCES = [
     "scielo_preprints",
     "preprints_ru",
     "chinarxiv",
+    "cyberleninka",
     "ssrn",
     "openreview",
     "unpaywall",
@@ -598,7 +601,7 @@ async def search_papers(
         query: Search query string.
         max_results_per_source: Max results to fetch from each selected source.
         sources: Comma-separated source names or 'all'.
-            Available: arxiv,pubmed,biorxiv,medrxiv,google_scholar,iacr,semantic,crossref,openalex,pmc,core,europepmc,dblp,openaire,citeseerx,doaj,base,zenodo,hal,jxiv,scielo_preprints,preprints_ru,chinarxiv,ssrn,openreview,unpaywall
+            Available: arxiv,pubmed,biorxiv,medrxiv,google_scholar,iacr,semantic,crossref,openalex,pmc,core,europepmc,dblp,openaire,citeseerx,doaj,base,zenodo,hal,jxiv,scielo_preprints,preprints_ru,chinarxiv,cyberleninka,ssrn,openreview,unpaywall
         year: Optional year filter for Semantic Scholar only.
     Returns:
         Aggregated dictionary with per-source stats, errors, and deduplicated papers.
@@ -669,6 +672,8 @@ async def search_papers(
             task_map[source] = search_preprints_ru(query, max_results_per_source)
         elif source == "chinarxiv":
             task_map[source] = search_chinarxiv(query, max_results_per_source)
+        elif source == "cyberleninka":
+            task_map[source] = search_cyberleninka(query, max_results_per_source)
         elif source == "openreview":
             task_map[source] = search_openreview(query, max_results_per_source)
         elif source == "ssrn":
@@ -1194,7 +1199,7 @@ async def download_with_fallback(
     """Try source-native download, OA repositories, Unpaywall, then optional Sci-Hub.
 
     Args:
-        source: Source name (arxiv, biorxiv, medrxiv, iacr, semantic, crossref, pubmed, pmc, core, europepmc, citeseerx, doaj, base, zenodo, hal, jxiv, scielo_preprints, preprints_ru, chinarxiv, ssrn).
+        source: Source name (arxiv, biorxiv, medrxiv, iacr, semantic, crossref, pubmed, pmc, core, europepmc, citeseerx, doaj, base, zenodo, hal, jxiv, scielo_preprints, preprints_ru, chinarxiv, cyberleninka, ssrn).
         paper_id: Source-native paper identifier.
         doi: Optional DOI used for repository/unpaywall/Sci-Hub fallback.
         title: Optional title used for repository/Sci-Hub fallback when DOI is unavailable.
@@ -1226,6 +1231,7 @@ async def download_with_fallback(
         "scielo_preprints": scielo_preprints_searcher.download_pdf,
         "preprints_ru": preprints_ru_searcher.download_pdf,
         "chinarxiv": chinarxiv_searcher.download_pdf,
+        "cyberleninka": cyberleninka_searcher.download_pdf,
         "ssrn": ssrn_searcher.download_pdf,
         "openreview": openreview_searcher.download_pdf,
     }
@@ -1965,6 +1971,56 @@ async def read_preprints_ru_paper(paper_id: str, save_path: str = "./downloads")
 async def download_preprints_ru(paper_id: str, save_path: str = "./downloads") -> str:
     """Download the PDF of a Preprints.ru preprint (numeric id or URL)."""
     return preprints_ru_searcher.download_pdf(paper_id, save_path)
+
+
+@mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
+async def search_cyberleninka(query: str, max_results: int = 10) -> List[Dict]:
+    """Search CyberLeninka, Russia's open-access journal archive (0..100 results).
+
+    Most records are in Russian; Russian-language queries match far more.
+    """
+    return await async_search(cyberleninka_searcher, query, max_results)
+
+
+@mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
+async def list_new_cyberleninka(since: str, max_results: int = 100, oai_set: str = "") -> List[Dict]:
+    """List CyberLeninka records added since a date, via OAI-PMH.
+
+    Args:
+        since: Date in YYYY-MM-DD format.
+        max_results: Maximum number of records to return (default: 100).
+        oai_set: Optional OAI set, 'scopus' or 'wos', to keep only indexed journals.
+    """
+    papers = await asyncio.to_thread(
+        cyberleninka_searcher.list_new, since, max_results, set=oai_set
+    )
+    return [paper.to_dict() for paper in papers]
+
+
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": True, "openWorldHint": True})
+async def read_cyberleninka_paper(paper_id: str, save_path: str = "./downloads") -> str:
+    """Read and extract text content from a CyberLeninka article.
+
+    Args:
+        paper_id: CyberLeninka article slug or URL.
+        save_path: Directory where the PDF is/will be saved (default: './downloads').
+    Returns:
+        str: Extracted text content.
+    """
+    return cyberleninka_searcher.read_paper(paper_id, save_path)
+
+
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": True, "openWorldHint": True})
+async def download_cyberleninka(paper_id: str, save_path: str = "./downloads") -> str:
+    """Download PDF for a CyberLeninka article.
+
+    Args:
+        paper_id: CyberLeninka article slug or URL.
+        save_path: Directory to save the PDF (default: './downloads').
+    Returns:
+        str: Path to downloaded PDF.
+    """
+    return cyberleninka_searcher.download_pdf(paper_id, save_path)
 
 
 @mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": True, "openWorldHint": True})
