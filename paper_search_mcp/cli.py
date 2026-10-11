@@ -246,6 +246,8 @@ async def cmd_search(args: argparse.Namespace) -> int:
             extra["db"] = getattr(args, "wos_db", "WOS")
         if src == "semantic" and args.year:
             extra["year"] = args.year
+        if src == "openalex" and getattr(args, "openalex_filter", "").strip():
+            extra["filter"] = args.openalex_filter.strip()
         if src == "scopus":
             extra = {"view": getattr(args, "scopus_view", "STANDARD"),
                      "sort": getattr(args, "scopus_sort", "relevance"),
@@ -408,6 +410,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_search.add_argument("--scopus-sort", choices=("relevance", "coverDate", "citedby-count", "creator"), default="relevance")
     p_search.add_argument("--scopus-field", choices=("", "TITLE", "ABS", "KEY", "AUTH", "AFFILORG"), default="")
     p_search.add_argument("--scopus-date", default="", help="Scopus YYYY or YYYY-YYYY date filter")
+
+    p_search.add_argument("--openalex-filter", default="",
+                          help="OpenAlex works filter, e.g. 'institutions.country_code:IL' "
+                               "(see https://help.openalex.org/api/filtering/)")
 
     p_search.add_argument("--wos-db", default="WOS",
                           choices=("BCI", "BIOABS", "BIOSIS", "CCC", "DIIDW", "DRCI", "MEDLINE", "PPRN", "RC", "WOK", "WOS", "ZOOREC"),

@@ -468,15 +468,18 @@ def test_timeout_path_passes_source_options_without_constructing_parent_searcher
             {"source": "wos", "query": "test", "max_results": 2, "kwargs": {"db": "WOK"}},
             {"source": "scopus", "query": "test", "max_results": 2,
              "kwargs": {"view": "COMPLETE", "sort": "coverDate", "field": "TITLE", "date": "2024"}},
+            {"source": "openalex", "query": "test", "max_results": 2,
+             "kwargs": {"filter": "institutions.country_code:IL"}},
         ]
-        return [[], [], []]
+        return [[], [], [], []]
 
     monkeypatch.setattr(cli_search, "search_sources", search)
     monkeypatch.setattr(cli, "_get_searcher", Mock(side_effect=AssertionError("parent source constructed")))
     args = cli.build_parser().parse_args([
-        "search", "test", "-s", "semantic,wos,scopus", "-n", "2", "--source-timeout", "5",
+        "search", "test", "-s", "semantic,wos,scopus,openalex", "-n", "2", "--source-timeout", "5",
         "--year", "2020", "--wos-db", "WOK", "--scopus-view", "COMPLETE",
         "--scopus-sort", "coverDate", "--scopus-field", "TITLE", "--scopus-date", "2024",
+        "--openalex-filter", "institutions.country_code:IL",
     ])
     assert asyncio.run(cli.cmd_search(args)) == 0
     assert json.loads(capsys.readouterr().out)["errors"] == {}
