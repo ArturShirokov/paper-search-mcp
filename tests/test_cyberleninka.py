@@ -162,3 +162,32 @@ def test_list_new_tool_returns_dicts(monkeypatch):
 
     assert calls == {"since": "2026-10-09", "max_results": 5, "set": "wos"}
     assert result[0]["paper_id"] == "kvantovaya-kriptografiya"
+
+
+def test_search_tolerates_bad_year_and_trailing_slash(searcher):
+    bad = dict(SEARCH_JSON["articles"][0], year="н.д.", link="/article/n/odd/")
+    searcher.session.post = MagicMock(return_value=_response({"articles": [bad]}))
+
+    [paper] = searcher.search("q")
+
+    assert paper.published_date is None
+    assert paper.url == "https://cyberleninka.ru/article/n/odd"
+    assert paper.pdf_url == "https://cyberleninka.ru/article/n/odd/pdf"
+
+
+def test_oai_record_without_identifier_is_skipped(searcher):
+    import xml.etree.ElementTree as ET
+
+    page = OAI_PAGE_2.replace(
+        "<identifier>https://cyberleninka.ru/article/n/second-article</identifier>", ""
+    )
+    record = ET.fromstring(page).find(".//{http://www.openarchives.org/OAI/2.0/}record")
+
+    assert searcher._parse_oai_record(record) is None
+
+
+def test_download_and_read_tools_exist():
+    from paper_search_mcp import server
+
+    assert callable(server.download_cyberleninka)
+    assert callable(server.read_cyberleninka_paper)

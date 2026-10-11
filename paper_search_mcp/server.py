@@ -1180,7 +1180,7 @@ async def download_with_fallback(
     """Try source-native download, OA repositories, Unpaywall, then optional Sci-Hub.
 
     Args:
-        source: Source name (arxiv, biorxiv, medrxiv, iacr, semantic, crossref, pubmed, pmc, core, europepmc, citeseerx, doaj, base, zenodo, hal, ssrn).
+        source: Source name (arxiv, biorxiv, medrxiv, iacr, semantic, crossref, pubmed, pmc, core, europepmc, citeseerx, doaj, base, zenodo, hal, cyberleninka, ssrn).
         paper_id: Source-native paper identifier.
         doi: Optional DOI used for repository/unpaywall/Sci-Hub fallback.
         title: Optional title used for repository/Sci-Hub fallback when DOI is unavailable.
@@ -1826,6 +1826,32 @@ async def download_hal(paper_id: str, save_path: str = "./downloads") -> str:
         str: Path to downloaded PDF.
     """
     return hal_searcher.download_pdf(paper_id, save_path)
+
+
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": True, "openWorldHint": True})
+async def read_cyberleninka_paper(paper_id: str, save_path: str = "./downloads") -> str:
+    """Read and extract text content from a CyberLeninka article.
+
+    Args:
+        paper_id: CyberLeninka article slug or URL.
+        save_path: Directory where the PDF is/will be saved (default: './downloads').
+    Returns:
+        str: Extracted text content.
+    """
+    return cyberleninka_searcher.read_paper(paper_id, save_path)
+
+
+@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": True, "openWorldHint": True})
+async def download_cyberleninka(paper_id: str, save_path: str = "./downloads") -> str:
+    """Download PDF for a CyberLeninka article.
+
+    Args:
+        paper_id: CyberLeninka article slug or URL.
+        save_path: Directory to save the PDF (default: './downloads').
+    Returns:
+        str: Path to downloaded PDF.
+    """
+    return cyberleninka_searcher.download_pdf(paper_id, save_path)
 
 
 @mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": True, "openWorldHint": True})

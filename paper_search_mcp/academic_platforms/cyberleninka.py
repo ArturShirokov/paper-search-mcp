@@ -78,15 +78,15 @@ class CyberLeninkaSearcher(OAIPMHSearcher):
         return output_file
 
     def _parse_article(self, article: dict) -> Paper:
-        url = BASE_URL + article["link"]
-        year = article.get("year")
+        url = BASE_URL + article["link"].rstrip("/")
+        year = str(article.get("year") or "")
         return Paper(
             paper_id=_slug(url),
             title=_clean(article.get("name")),
             authors=[a for a in article.get("authors") or [] if a],
             abstract=_clean(article.get("annotation")),
             doi="",
-            published_date=datetime(int(year), 1, 1) if year else None,
+            published_date=datetime(int(year), 1, 1) if year.isdigit() else None,
             pdf_url=f"{url}/pdf",
             url=url,
             source="cyberleninka",
@@ -95,12 +95,15 @@ class CyberLeninkaSearcher(OAIPMHSearcher):
 
     def _parse_oai_record(self, record: ET.Element) -> Optional[Paper]:
         paper = super()._parse_oai_record(record)
-        if paper is None:
+        if paper is None or not paper.url.startswith(ARTICLE_PREFIX):
             return None
+        paper.url = paper.url.rstrip("/")
         paper.paper_id = _slug(paper.url)
         paper.pdf_url = f"{paper.url}/pdf"
         # Records carry no dc:date; the datestamp is when CyberLeninka added it.
         datestamp = record.findtext(f"{{{OAI_NS}}}header/{{{OAI_NS}}}datestamp") or ""
-        if datestamp:
+        try:
             paper.updated_date = datetime.strptime(datestamp[:19], "%Y-%m-%dT%H:%M:%S")
+        except ValueError:
+            pass  # Keep the record; only the added-date is unknown.
         return paper

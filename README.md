@@ -114,7 +114,7 @@ This matrix reflects **verified live-integration results** from functional and e
 | BASE | ⚠️ | ✅ (record-dependent) | ✅ (record-dependent) | OAI-PMH endpoint requires institutional IP registration; returns empty gracefully otherwise |
 | Zenodo | ✅ | ✅ (record-dependent) | ✅ (record-dependent) | Open API; reliable |
 | HAL | ✅ | ✅ (record-dependent) | ✅ (record-dependent) | Open API; reliable |
-| CyberLeninka | ✅ | ✅ | ✅ | Russian open-access journals; keyless; `list_new_cyberleninka` harvests by date via OAI-PMH |
+| CyberLeninka | ✅ | ✅ | ✅ (older PDFs may extract garbled) | Russian open-access journals; keyless; `list_new_cyberleninka` harvests by date via OAI-PMH |
 | SSRN | ✅ (OpenAlex metadata) | ⚠️ best-effort | ⚠️ best-effort | Public discovery verified; SSRN page/PDF identity must be verified separately |
 | OpenReview | ✅ (anonymous API v2) | ⚠️ public-only | ⚠️ public-only | Search verified; exact-note lookup returned 403 in live PDF check; PDF success is mock-tested only |
 | Unpaywall | ✅ (DOI lookup) | ❌ | ❌ | **Requires** `PAPER_SEARCH_MCP_UNPAYWALL_EMAIL` |
