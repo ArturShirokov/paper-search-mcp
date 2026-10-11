@@ -85,6 +85,10 @@ help. `read scopus <id>` returns structured abstract metadata; `--full-text`
 explicitly attempts identity-verified article text and returns a nonzero exit
 when full text remains unavailable. An abstract-only result is not full text.
 
+Narrow OpenAlex results with `--openalex-filter`, e.g.
+`-s openalex --openalex-filter institutions.country_code:IL`
+(see https://help.openalex.org/api/filtering/).
+
 The tool command also exposes `get_citing_papers`, `get_referenced_papers`,
 `get_search_cache_status`, and `clear_search_cache`. Relationship lookups accept
 DOIs/OpenAlex IDs, with bounded one-hop retrieval. Caching is off by default;

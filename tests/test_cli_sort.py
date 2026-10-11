@@ -126,3 +126,17 @@ def test_cmd_search_invalid_source(monkeypatch, capsys):
     assert asyncio.run(cli.cmd_search(args)) == 1
     assert json.loads(capsys.readouterr().out) == {
         "error": "No valid sources selected", "available": ["arxiv"]}
+
+
+@pytest.mark.parametrize("flag, expected", [
+    (["--openalex-filter", " institutions.country_code:IL "],
+     {"filter": "institutions.country_code:IL"}),
+    ([], {}),
+])
+def test_cmd_search_passes_openalex_filter_only_to_openalex(monkeypatch, capsys, flag, expected):
+    searchers = install_searchers(monkeypatch, {"openalex": [paper("a")], "arxiv": [paper("b")]})
+    args = cli.build_parser().parse_args(["search", "q", "-s", "openalex,arxiv", "-n", "2", *flag])
+    assert asyncio.run(cli.cmd_search(args)) == 0
+    capsys.readouterr()
+    searchers["openalex"].search.assert_called_once_with("q", max_results=2, **expected)
+    searchers["arxiv"].search.assert_called_once_with("q", max_results=2)
