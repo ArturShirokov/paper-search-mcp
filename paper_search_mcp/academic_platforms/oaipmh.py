@@ -218,13 +218,13 @@ class OAIPMHSearcher(PaperSource):
 
             # Extract Dublin Core fields
             title_elem = _find_dc(dc_root, 'title')
-            title = title_elem.text if title_elem is not None else ''
+            title = (title_elem.text if title_elem is not None else '') or ''
 
             author_elems = dc_root.findall(f'{{{DC_NS}}}creator') or dc_root.findall('creator')
             authors = [elem.text for elem in author_elems if elem.text]
 
             description_elem = _find_dc(dc_root, 'description')
-            abstract = description_elem.text if description_elem is not None else ''
+            abstract = (description_elem.text if description_elem is not None else '') or ''
 
             date_elem = _find_dc(dc_root, 'date')
             date_str = date_elem.text if date_elem is not None else ''

@@ -34,3 +34,15 @@ def test_parse_oai_record_reads_childless_dc_elements():
     assert paper.url == "https://example.org/article/1"
     assert paper.extra["publisher"] == "Example Press"
     assert paper.extra["language"] == "ru"
+
+
+def test_empty_dc_elements_become_empty_strings():
+    record = RECORD.replace("<dc:title>Leaf title</dc:title>", "<dc:title/>").replace(
+        "<dc:description>Leaf abstract</dc:description>", "<dc:description/>"
+    )
+    searcher = OAIPMHSearcher("https://example.org/oai")
+    paper = searcher._parse_oai_record(ET.fromstring(record))
+
+    assert paper.title == ""
+    assert paper.abstract == ""
+    assert searcher._matches_query(paper, "lovelace")
