@@ -44,6 +44,18 @@ def _find_dc(root: ET.Element, tag: str) -> Optional[ET.Element]:
     return elem if elem is not None else root.find(tag)
 
 
+class OAIPMHError(RuntimeError):
+    """OAI-PMH error reply.
+
+    `code` is the protocol error code (e.g. badArgument), or `notOAIPMH` when
+    the reply is not an OAI-PMH document at all.
+    """
+
+    def __init__(self, code: str, message: str):
+        super().__init__(f"OAI-PMH error {code}: {message}")
+        self.code = code
+
+
 class OAIPMHSearcher(PaperSource):
     """Base searcher for OAI-PMH compatible repositories.
 
@@ -84,7 +96,12 @@ class OAIPMHSearcher(PaperSource):
                 - until_date: Date until which to harvest (YYYY-MM-DD)
 
         Returns:
-            List of Paper objects
+            List of Paper objects; empty when the repository answers noRecordsMatch.
+
+        Raises:
+            requests.RequestException: the harvest request failed.
+            OAIPMHError: any other OAI-PMH error, or a non-OAI-PMH reply.
+            xml.etree.ElementTree.ParseError: the reply was not XML.
         """
         papers = []
         params = {
@@ -103,78 +120,71 @@ class OAIPMHSearcher(PaperSource):
         # For simple text queries, we need to filter after retrieval
         # OAI-PMH doesn't support full-text search directly
         # We'll retrieve records and filter locally
-        retry_count = 0
-        max_retries = 3
         resumption_token = None
 
-        try:
-            while len(papers) < max_results:
-                # Prepare request parameters
-                request_params = params.copy()
-                if resumption_token:
-                    request_params = {
-                        'verb': 'ListRecords',
-                        'resumptionToken': resumption_token
-                    }
+        while len(papers) < max_results:
+            # Prepare request parameters
+            request_params = params.copy()
+            if resumption_token:
+                request_params = {
+                    'verb': 'ListRecords',
+                    'resumptionToken': resumption_token
+                }
 
-                # Make OAI-PMH request
-                response = self.session.get(
-                    self.base_url,
-                    params=request_params,
-                    timeout=30
-                )
-                response.raise_for_status()
+            # Make OAI-PMH request
+            response = self.session.get(
+                self.base_url,
+                params=request_params,
+                timeout=30
+            )
+            response.raise_for_status()
 
-                # Parse XML response
-                root = ET.fromstring(response.content)
+            # Parse XML response
+            root = ET.fromstring(response.content)
+            if root.tag != f'{{{OAI_NS}}}OAI-PMH':
+                # e.g. BASE's bare <error>Access denied ...</error>
+                raise OAIPMHError('notOAIPMH', ''.join(root.itertext()).strip()[:200])
 
-                # Check for OAI-PMH errors
-                error_elem = root.find(f'.//{{{OAI_NS}}}error')
-                if error_elem is not None:
-                    error_code = error_elem.get('code', 'unknown')
-                    error_msg = error_elem.text or f"OAI-PMH error: {error_code}"
-                    logger.warning(f"OAI-PMH error: {error_code} - {error_msg}")
+            # Check for OAI-PMH errors
+            error_elem = root.find(f'.//{{{OAI_NS}}}error')
+            if error_elem is not None:
+                error_code = error_elem.get('code', 'unknown')
+                if error_code == 'noRecordsMatch':
+                    break  # a genuine empty result, not a failure
+                raise OAIPMHError(error_code, (error_elem.text or '').strip())
+
+            # Process records
+            records = root.findall(f'.//{{{OAI_NS}}}record')
+            for record in records:
+                if len(papers) >= max_results:
                     break
 
-                # Process records
-                records = root.findall(f'.//{{{OAI_NS}}}record')
-                for record in records:
-                    if len(papers) >= max_results:
-                        break
+                try:
+                    paper = self._parse_oai_record(record)
+                    if paper:
+                        # Apply query filter (OAI-PMH doesn't support search natively)
+                        if query and self._matches_query(paper, query):
+                            papers.append(paper)
+                        elif not query:  # If no query, include all records
+                            papers.append(paper)
+                except Exception as e:
+                    logger.warning(f"Error parsing OAI-PMH record: {e}")
+                    continue
 
-                    try:
-                        paper = self._parse_oai_record(record)
-                        if paper:
-                            # Apply query filter (OAI-PMH doesn't support search natively)
-                            if query and self._matches_query(paper, query):
-                                papers.append(paper)
-                            elif not query:  # If no query, include all records
-                                papers.append(paper)
-                    except Exception as e:
-                        logger.warning(f"Error parsing OAI-PMH record: {e}")
-                        continue
+            # Check for resumption token
+            token_elem = root.find(f'.//{{{OAI_NS}}}resumptionToken')
+            if token_elem is not None and token_elem.text:
+                resumption_token = token_elem.text
+                # Respect requested delay if specified
+                cursor = token_elem.get('cursor')
+                if cursor and token_elem.get('completeListSize'):
+                    total = int(token_elem.get('completeListSize'))
+                    logger.debug(f"OAI-PMH pagination: {cursor}/{total}")
+            else:
+                break  # No more records
 
-                # Check for resumption token
-                token_elem = root.find(f'.//{{{OAI_NS}}}resumptionToken')
-                if token_elem is not None and token_elem.text:
-                    resumption_token = token_elem.text
-                    # Respect requested delay if specified
-                    cursor = token_elem.get('cursor')
-                    if cursor and token_elem.get('completeListSize'):
-                        total = int(token_elem.get('completeListSize'))
-                        logger.debug(f"OAI-PMH pagination: {cursor}/{total}")
-                else:
-                    break  # No more records
-
-                # Rate limiting - small delay between requests
-                time.sleep(0.5)
-
-        except requests.exceptions.RequestException as e:
-            logger.error(f"OAI-PMH request failed: {e}")
-        except ET.ParseError as e:
-            logger.error(f"Failed to parse OAI-PMH XML response: {e}")
-        except Exception as e:
-            logger.error(f"Unexpected error in OAI-PMH search: {e}")
+            # Rate limiting - small delay between requests
+            time.sleep(0.5)
 
         return papers[:max_results]
 
