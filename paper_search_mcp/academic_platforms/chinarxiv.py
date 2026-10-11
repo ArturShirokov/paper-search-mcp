@@ -52,10 +52,8 @@ class ChinaRxivSearcher(PaperSource):
             page = dict(params, limit=min(max_results - len(papers), self.MAX_PAGE_SIZE))
             if cursor:
                 page["cursor"] = cursor
-            response = self.session.get(API_URL, params=page, timeout=30)
-            response.raise_for_status()
-            data = response.json()
-            papers.extend(self._parse(record) for record in data.get("data") or [])
+            data = self._get(API_URL, params=page, timeout=30).json()
+            papers.extend(self._parse(r) for r in data.get("data") or [] if r.get("id"))
             cursor = data.get("next_cursor")
             if not cursor or not data.get("data"):
                 break
@@ -67,8 +65,7 @@ class ChinaRxivSearcher(PaperSource):
 
     def download_pdf(self, paper_id: str, save_path: str = "./downloads") -> str:
         """Download the English PDF."""
-        response = self.session.get(f"{API_URL}/{paper_id}/pdf", timeout=60)
-        response.raise_for_status()
+        response = self._get(f"{API_URL}/{paper_id}/pdf", timeout=60)
         if not response.content.startswith(b"%PDF"):
             raise ValueError(f"ChinaRxiv returned no PDF for {paper_id}")
         os.makedirs(save_path, exist_ok=True)
@@ -79,14 +76,24 @@ class ChinaRxivSearcher(PaperSource):
 
     def read_paper(self, paper_id: str, save_path: str = "./downloads") -> str:
         """Return the translated full text as Markdown (no PDF parsing)."""
-        response = self.session.get(f"{API_URL}/{paper_id}/text", timeout=60)
+        text = self._get(f"{API_URL}/{paper_id}/text", timeout=60).json().get("body_md")
+        if not text:
+            raise ValueError(f"ChinaRxiv has no full text for {paper_id}; try download_chinarxiv")
+        return text
+
+    def _get(self, url: str, **kwargs) -> requests.Response:
+        response = self.session.get(url, **kwargs)
+        if response.status_code == 422:
+            # The body names the bad parameter; raise_for_status would drop it.
+            raise ValueError(f"ChinaRxiv rejected the request: {response.text[:300]}")
         response.raise_for_status()
-        return response.json().get("body_md") or ""
+        return response
 
     def _parse(self, record: Dict[str, Any]) -> Paper:
         paper_id = record["id"]
         # ponytail: authors arrive as one comma-joined string; "Last, First" names would split wrongly.
-        authors = [a.strip() for entry in record.get("authors") or [] for a in entry.split(",") if a.strip()]
+        parts = (a.strip() for entry in record.get("authors") or [] for a in entry.split(","))
+        authors = [a[4:] if a.startswith("and ") else a for a in parts if a]
         date = record.get("date") or ""
         try:
             published = datetime.strptime(date, "%Y-%m-%d")

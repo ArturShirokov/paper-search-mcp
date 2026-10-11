@@ -143,3 +143,28 @@ def test_list_new_tool_passes_corpus(monkeypatch):
 
     assert calls == {"since": "2026-09-01", "max_results": 5, "corpus": "russiarxiv"}
     assert result[0]["paper_id"] == "chinaxiv-202604.00249"
+
+
+def test_oxford_comma_authors_and_records_without_id(searcher):
+    paper = searcher._parse(dict(RECORD, authors=["Hui Li, Qing-Wei Li, and Li-Qiang Song"]))
+    assert paper.authors == ["Hui Li", "Qing-Wei Li", "Li-Qiang Song"]
+
+    searcher.session.get = MagicMock(return_value=_response({"data": [{"title": "no id"}, RECORD]}))
+    assert [p.paper_id for p in searcher.search("x")] == ["chinaxiv-202604.00249"]
+
+
+def test_read_paper_without_text_raises(searcher):
+    searcher.session.get = MagicMock(return_value=_response({"body_md": "", "word_count": 0}))
+
+    with pytest.raises(ValueError, match="no full text"):
+        searcher.read_paper("chinaxiv-202609.00181")
+
+
+def test_validation_error_keeps_api_detail(searcher):
+    rejected = _response()
+    rejected.status_code = 422
+    rejected.text = '{"errors":{"query":{"from_date":["Not a valid date."]}}}'
+    searcher.session.get = MagicMock(return_value=rejected)
+
+    with pytest.raises(ValueError, match="Not a valid date"):
+        searcher.list_new("2026/09/01")
