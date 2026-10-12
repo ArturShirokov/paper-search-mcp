@@ -37,7 +37,7 @@ class ArxivSearcher(PaperSource):
     _request_lock = Lock()
     _last_request_at = 0.0
     _FIELD_PREFIX_RE = re.compile(
-        r"(?:^|\s)(ti|au|abs|co|jr|cat|rn|id|all):",
+        r"(?:^|\s)(ti|au|abs|co|jr|cat|rn|id|all|submittedDate|lastUpdatedDate):",
         re.IGNORECASE,
     )
     _BOOLEAN_OP_RE = re.compile(r"(?:^|\s)(AND|OR|ANDNOT)(?:\s|$)")
@@ -179,17 +179,16 @@ class ArxivSearcher(PaperSource):
 
     @staticmethod
     def _build_search_query(query: str) -> str:
-        """Quote plain phrases while preserving arXiv's structured query syntax."""
-        normalized = " ".join((query or "").split())
+        """AND plain words together while preserving arXiv's structured query syntax."""
+        terms = (query or "").split()
+        normalized = " ".join(terms)
         if (
             '"' in normalized
             or ArxivSearcher._FIELD_PREFIX_RE.search(normalized)
             or ArxivSearcher._BOOLEAN_OP_RE.search(normalized)
         ):
             return normalized
-        if re.search(r"\s", normalized):
-            return f'all:"{normalized}"'
-        return f'all:{normalized}'
+        return " AND ".join(f"all:{term}" for term in terms)
 
     def search(self, query: str, max_results: int = 10, sort_by: str = 'relevance', sort_order: str = 'descending') -> List[Paper]:
         params = {

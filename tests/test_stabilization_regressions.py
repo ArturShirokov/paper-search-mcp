@@ -23,17 +23,20 @@ def test_mcp_dependency_stays_on_compatible_major_version():
     assert '"fastmcp>=3.4.2,<4"' in project_config
 
 
-def test_arxiv_uses_https_and_quotes_plain_multi_word_query():
+def test_arxiv_uses_https_and_ands_plain_multi_word_query():
     assert ArxivSearcher.BASE_URL == "https://export.arxiv.org/api/query"
     assert (
-        ArxivSearcher._build_search_query("  machine   learning  ")
-        == 'all:"machine learning"'
+        ArxivSearcher._build_search_query("  historical   document OCR  ")
+        == "all:historical AND all:document AND all:OCR"
     )
+    assert ArxivSearcher._build_search_query("agents") == "all:agents"
     assert (
         ArxivSearcher._build_search_query('"machine learning"')
         == '"machine learning"'
     )
     assert ArxivSearcher._build_search_query("ti:agents") == "ti:agents"
+    date_filter = "submittedDate:[202401010000 TO 202412312359]"
+    assert ArxivSearcher._build_search_query(date_filter) == date_filter
     assert (
         ArxivSearcher._build_search_query("au:Hinton AND ti:dropout")
         == "au:Hinton AND ti:dropout"
