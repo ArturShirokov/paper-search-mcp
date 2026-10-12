@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
+import requests
 
 from paper_search_mcp import cli, cli_search, cli_search_worker, server
 from paper_search_mcp.academic_platforms.iacr import IACRSearcher
@@ -143,7 +144,7 @@ def test_timed_out_blocking_search_keeps_capacity_until_worker_exits():
 
 
 def test_pubmed_search_uses_bounded_request_timeout():
-    response = Mock(content=b"<eSearchResult><IdList /></eSearchResult>")
+    response = Mock(status_code=200, content=b"<eSearchResult><IdList /></eSearchResult>")
     with patch(
         "paper_search_mcp.academic_platforms.pubmed.requests.get",
         return_value=response,
@@ -155,10 +156,11 @@ def test_pubmed_search_uses_bounded_request_timeout():
 
 def test_iacr_search_uses_bounded_request_timeout():
     searcher = IACRSearcher()
-    response = Mock(status_code=503)
+    response = Mock(status_code=503, headers={})
     searcher.session.get = Mock(return_value=response)
 
-    assert searcher.search("test", fetch_details=False) == []
+    with pytest.raises(requests.HTTPError):
+        searcher.search("test", fetch_details=False)
     assert searcher.session.get.call_args.kwargs["timeout"] == 30
 
 

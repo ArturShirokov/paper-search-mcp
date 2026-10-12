@@ -9,7 +9,7 @@ import time
 from ..paper import Paper
 from ..utils import extract_doi
 from ..config import get_env
-from .base import PaperSource
+from .base import PaperSource, check_response, json_body
 from pypdf import PdfReader
 
 logger = logging.getLogger(__name__)
@@ -54,107 +54,102 @@ class CORESearcher(PaperSource):
 
         Returns:
             List[Paper]: List of found papers with metadata
+
+        Raises:
+            requests.RequestException: On network failure, or a non-2xx reply
+                once retries are used up.
+            ValueError: If the reply is not JSON or has no 'results' list.
         """
         papers = []
 
-        try:
-            # Prepare search parameters
-            params = {
-                'q': query,
-                'limit': min(max_results, 100),  # CORE API max limit is 100
-                'offset': 0,
-            }
+        # Prepare search parameters
+        params = {
+            'q': query,
+            'limit': min(max_results, 100),  # CORE API max limit is 100
+            'offset': 0,
+        }
 
-            # Add optional filters
-            if 'year' in kwargs:
-                params['year'] = kwargs['year']
-            if 'language' in kwargs:
-                params['language'] = kwargs['language']
-            if 'repository' in kwargs:
-                params['repository'] = kwargs['repository']
-            if 'has_fulltext' in kwargs:
-                params['has_fulltext'] = str(kwargs['has_fulltext']).lower()
+        # Add optional filters
+        if 'year' in kwargs:
+            params['year'] = kwargs['year']
+        if 'language' in kwargs:
+            params['language'] = kwargs['language']
+        if 'repository' in kwargs:
+            params['repository'] = kwargs['repository']
+        if 'has_fulltext' in kwargs:
+            params['has_fulltext'] = str(kwargs['has_fulltext']).lower()
 
-            # Add other supported parameters
-            supported_params = ['publishedAfter', 'publishedBefore', 'doi', 'issn', 'isbn']
-            for param in supported_params:
-                if param in kwargs:
-                    params[param] = kwargs[param]
+        # Add other supported parameters
+        supported_params = ['publishedAfter', 'publishedBefore', 'doi', 'issn', 'isbn']
+        for param in supported_params:
+            if param in kwargs:
+                params[param] = kwargs[param]
 
-            response = None
-            for attempt in range(3):
-                try:
-                    candidate = self.session.get(f"{self.BASE_URL}/search/works", params=params, timeout=30)
+        attempts = 3
+        for attempt in range(attempts):
+            last_attempt = attempt == attempts - 1
+            try:
+                response = self.session.get(f"{self.BASE_URL}/search/works", params=params, timeout=30)
+            except requests.Timeout:
+                if last_attempt:
+                    raise
+                wait_seconds = min(8, 2 ** attempt)
+                logger.warning(
+                    "CORE request timed out (attempt %s/%s). Retrying in %ss",
+                    attempt + 1,
+                    attempts,
+                    wait_seconds,
+                )
+                time.sleep(wait_seconds)
+                continue
 
-                    if candidate.status_code in self.RETRYABLE_STATUS_CODES:
-                        wait_seconds = min(8, 2 ** attempt)
-                        logger.warning(
-                            "CORE request returned %s (attempt %s/3). Retrying in %ss",
-                            candidate.status_code,
-                            attempt + 1,
-                            wait_seconds,
-                        )
-                        time.sleep(wait_seconds)
-                        continue
+            if response.status_code in self.RETRYABLE_STATUS_CODES and not last_attempt:
+                wait_seconds = min(8, 2 ** attempt)
+                logger.warning(
+                    "CORE request returned %s (attempt %s/%s). Retrying in %ss",
+                    response.status_code,
+                    attempt + 1,
+                    attempts,
+                    wait_seconds,
+                )
+                time.sleep(wait_seconds)
+                continue
 
-                    if candidate.status_code in {401, 403} and self.api_key:
-                        logger.warning(
-                            "CORE API key was rejected (status=%s). Retrying once without key.",
-                            candidate.status_code,
-                        )
-                        fallback_headers = {
-                            'User-Agent': self.session.headers.get('User-Agent', ''),
-                            'Accept': self.session.headers.get('Accept', 'application/json'),
-                        }
-                        candidate = requests.get(
-                            f"{self.BASE_URL}/search/works",
-                            params=params,
-                            headers=fallback_headers,
-                            timeout=30,
-                        )
+            if response.status_code in {401, 403} and self.api_key:
+                logger.warning(
+                    "CORE API key was rejected (status=%s). Retrying once without key.",
+                    response.status_code,
+                )
+                fallback_headers = {
+                    'User-Agent': self.session.headers.get('User-Agent', ''),
+                    'Accept': self.session.headers.get('Accept', 'application/json'),
+                }
+                response = requests.get(
+                    f"{self.BASE_URL}/search/works",
+                    params=params,
+                    headers=fallback_headers,
+                    timeout=30,
+                )
+            break
 
-                    candidate.raise_for_status()
-                    response = candidate
-                    break
-                except requests.Timeout:
-                    wait_seconds = min(8, 2 ** attempt)
-                    logger.warning(
-                        "CORE request timed out (attempt %s/3). Retrying in %ss",
-                        attempt + 1,
-                        wait_seconds,
-                    )
-                    time.sleep(wait_seconds)
+        check_response(response, "CORE")
+        data = json_body(response, "CORE")
+        if not isinstance(data, dict) or not isinstance(data.get('results'), list):
+            raise ValueError("CORE returned an unexpected reply (no 'results' list)")
 
-            if response is None:
-                return papers
+        # Parse results
+        for item in data['results']:
+            try:
+                paper = self._parse_item(item)
+                if paper:
+                    papers.append(paper)
+                    if len(papers) >= max_results:
+                        break
+            except Exception as e:
+                logger.warning(f"Error parsing CORE item: {e}")
+                continue
 
-            data = response.json()
-
-            # Parse results
-            results = data.get('results', [])
-            for item in results:
-                try:
-                    paper = self._parse_item(item)
-                    if paper:
-                        papers.append(paper)
-                        if len(papers) >= max_results:
-                            break
-                except Exception as e:
-                    logger.warning(f"Error parsing CORE item: {e}")
-                    continue
-
-            logger.info(f"CORE search returned {len(papers)} papers for query: {query}")
-
-        except requests.RequestException as e:
-            status_code = getattr(getattr(e, 'response', None), 'status_code', None)
-            if status_code == 401:
-                logger.error("CORE API authentication failed. Check your API key.")
-            elif status_code == 429:
-                logger.error("CORE API rate limit exceeded. Consider adding API key or reducing frequency.")
-            else:
-                logger.error(f"CORE search request error (status={status_code}): {e}")
-        except Exception as e:
-            logger.error(f"Unexpected error in CORE search: {e}")
+        logger.info(f"CORE search returned {len(papers)} papers for query: {query}")
 
         return papers
 

@@ -81,8 +81,51 @@ def test_rejected_key_falls_back_without_retrying_anonymous_429(searcher, monkey
     sleep.assert_not_called()
 
 
+def test_rate_limit_error_carries_retry_after(searcher, monkeypatch):
+    monkeypatch.setattr(searcher.session, "get", Mock(return_value=response(429, {"Retry-After": "30"})))
+    with pytest.raises(semantic.SemanticScholarRequestError, match=r"Retry-After: 30"):
+        searcher.search("test")
+
+
 def test_search_surfaces_rate_limit_as_error(searcher, monkeypatch):
     monkeypatch.setattr(searcher.session, "get", Mock(return_value=response(429)))
     monkeypatch.setattr(semantic.time, "sleep", Mock(side_effect=AssertionError("Unexpected retry")))
     with pytest.raises(semantic.SemanticScholarRequestError, match="rate_limited, HTTP 429"):
         searcher.search("test")
+
+
+# --- Failed or unreadable replies must raise, not look like zero results (#5) ---
+
+def ok_reply(json_data=None, headers=None):
+    reply = response(200, headers)
+    if json_data is None:
+        reply.json.side_effect = requests.JSONDecodeError("Expecting value", "", 0)
+    else:
+        reply.json.return_value = json_data
+    return reply
+
+
+def test_search_non_json_reply_raises(searcher, monkeypatch):
+    monkeypatch.setattr(
+        searcher.session, "get", Mock(return_value=ok_reply(headers={"Content-Type": "text/html"}))
+    )
+    with pytest.raises(ValueError, match="Semantic Scholar returned a non-JSON reply"):
+        searcher.search("test")
+
+
+def test_search_reply_without_data_raises(searcher, monkeypatch):
+    monkeypatch.setattr(searcher.session, "get", Mock(return_value=ok_reply({"message": "oops"})))
+    with pytest.raises(ValueError, match="Semantic Scholar reply has no 'data' list"):
+        searcher.search("test")
+
+
+def test_search_network_error_raises(searcher, monkeypatch):
+    monkeypatch.setattr(searcher.session, "get", Mock(side_effect=requests.ConnectionError("down")))
+    with pytest.raises(semantic.SemanticScholarRequestError, match="down"):
+        searcher.search("test")
+
+
+@pytest.mark.parametrize("body", [{"total": 0, "offset": 0}, {"total": 0, "data": []}])
+def test_search_genuine_empty_is_empty(searcher, monkeypatch, body):
+    monkeypatch.setattr(searcher.session, "get", Mock(return_value=ok_reply(body)))
+    assert searcher.search("test") == []

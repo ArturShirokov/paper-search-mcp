@@ -5,7 +5,19 @@ from xml.etree import ElementTree as ET
 from datetime import datetime
 from ..paper import Paper
 from ..utils import extract_doi
-from .base import PaperSource
+from .base import PaperSource, xml_root
+
+
+def _xml_root(response, expected_tag: str) -> ET.Element:
+    """Check an E-utilities reply and return its XML root, or raise."""
+    # <ERROR> comes back under an unexpected root (eFetchResult), so check it first.
+    root = xml_root(response, "PubMed", None)
+    error = root.find('ERROR')
+    if error is not None:
+        raise RuntimeError(f"PubMed returned an error: {(error.text or '').strip()}")
+    if root.tag != expected_tag:
+        raise ValueError(f"PubMed returned an unexpected reply (<{root.tag}>)")
+    return root
 
 class PubMedSearcher(PaperSource):
     """Searcher for PubMed papers"""
@@ -26,7 +38,7 @@ class PubMedSearcher(PaperSource):
             params=search_params,
             timeout=self.REQUEST_TIMEOUT_SECONDS,
         )
-        search_root = ET.fromstring(search_response.content)
+        search_root = _xml_root(search_response, 'eSearchResult')
         ids = [id.text for id in search_root.findall('.//Id') if id.text]
         if not ids:
             return []
@@ -41,7 +53,7 @@ class PubMedSearcher(PaperSource):
             params=fetch_params,
             timeout=self.REQUEST_TIMEOUT_SECONDS,
         )
-        fetch_root = ET.fromstring(fetch_response.content)
+        fetch_root = _xml_root(fetch_response, 'PubmedArticleSet')
         
         papers = []
         for article in fetch_root.findall('.//PubmedArticle'):

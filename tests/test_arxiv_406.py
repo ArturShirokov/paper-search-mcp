@@ -129,11 +129,27 @@ def test_normal_200_empty_feed_is_still_successful(paced_searcher):
 
 
 @pytest.mark.parametrize("status", [400, 403, 404, 500])
-def test_unrelated_http_failure_contract_is_unchanged(status, paced_searcher):
+def test_unrelated_http_failure_raises(status, paced_searcher):
     searcher, _, _ = paced_searcher
     # A valid body must not silently override any other non-200 status.
-    searcher.session.get = Mock(return_value=response_with(ARXIV_FEED, status))
-    assert searcher.search("test") == []
+    response = response_with(ARXIV_FEED, status)
+    response.headers = {"Retry-After": "60"}
+    searcher.session.get = Mock(return_value=response)
+    with pytest.raises(requests.HTTPError, match=rf"arXiv returned HTTP {status} \(Retry-After: 60\)"):
+        searcher.search("test")
+
+
+@pytest.mark.parametrize("body", [
+    b"",
+    b"<html><body>Service unavailable</body></html>",
+    b"<html><body>unclosed",
+    ARXIV_FEED.replace(b"http://www.w3.org/2005/Atom", b"urn:other"),
+], ids=["empty-body", "html", "broken-html", "wrong-namespace"])
+def test_200_without_atom_feed_raises(body, paced_searcher):
+    searcher, _, _ = paced_searcher
+    searcher.session.get = Mock(return_value=response_with(body))
+    with pytest.raises(ValueError, match="arXiv returned a reply that is not an Atom feed"):
+        searcher.search("test")
 
 
 def test_unified_search_reports_406_as_source_error(paced_searcher):

@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 from ..paper import Paper
 from ..utils import extract_doi
-from .base import PaperSource
+from .base import PaperSource, xml_root
 from pypdf import PdfReader
 
 logger = logging.getLogger(__name__)
@@ -42,63 +42,69 @@ class PMCSearcher(PaperSource):
 
         Returns:
             List[Paper]: List of found papers with metadata
+
+        Raises:
+            requests.RequestException: On network failure or a non-2xx reply.
+            ValueError: If a reply is not XML or not the expected E-utilities document.
+            RuntimeError: If E-utilities reports the search itself failed.
         """
         papers = []
 
-        try:
-            # Step 1: Use E-utilities to search PMC database
-            search_params = {
-                'db': 'pmc',
-                'term': query,
-                'retmax': max_results,
-                'retmode': 'xml',
-                'tool': 'paper-search-mcp',
-                'email': 'openags@example.com'
-            }
+        # Step 1: Use E-utilities to search PMC database
+        search_params = {
+            'db': 'pmc',
+            'term': query,
+            'retmax': max_results,
+            'retmode': 'xml',
+            'tool': 'paper-search-mcp',
+            'email': 'openags@example.com'
+        }
 
-            search_response = self.session.get(self.EUTILS_SEARCH_URL, params=search_params, timeout=30)
-            search_response.raise_for_status()
-            search_root = ET.fromstring(search_response.content)
+        search_response = self.session.get(self.EUTILS_SEARCH_URL, params=search_params, timeout=30)
+        search_root = self._eutils_root(search_response, 'eSearchResult')
 
-            # Get PMC IDs
-            pmcids = [id_elem.text for id_elem in search_root.findall('.//Id') if id_elem.text]
-            if not pmcids:
-                logger.info(f"No PMC results found for query: {query}")
-                return papers
+        # Get PMC IDs
+        pmcids = [id_elem.text for id_elem in search_root.findall('.//Id') if id_elem.text]
+        if not pmcids:
+            logger.info(f"No PMC results found for query: {query}")
+            return papers
 
-            # Step 2: Fetch compact summaries (more stable than full-text efetch)
-            summary_params = {
-                'db': 'pmc',
-                'id': ','.join(pmcids),
-                'retmode': 'xml',
-                'tool': 'paper-search-mcp',
-                'email': 'openags@example.com'
-            }
+        # Step 2: Fetch compact summaries (more stable than full-text efetch)
+        summary_params = {
+            'db': 'pmc',
+            'id': ','.join(pmcids),
+            'retmode': 'xml',
+            'tool': 'paper-search-mcp',
+            'email': 'openags@example.com'
+        }
 
-            summary_response = self.session.get(self.EUTILS_SUMMARY_URL, params=summary_params, timeout=30)
-            summary_response.raise_for_status()
-            summary_root = ET.fromstring(summary_response.content)
+        summary_response = self.session.get(self.EUTILS_SUMMARY_URL, params=summary_params, timeout=30)
+        summary_root = self._eutils_root(summary_response, 'eSummaryResult')
 
-            # Step 3: Parse each summary record
-            for docsum in summary_root.findall('.//DocSum'):
-                try:
-                    paper = self._parse_docsum(docsum)
-                    if paper:
-                        papers.append(paper)
-                        if len(papers) >= max_results:
-                            break
-                except Exception as e:
-                    logger.warning(f"Error parsing PMC summary: {e}")
-                    continue
-
-        except requests.RequestException as e:
-            logger.error(f"PMC search request error: {e}")
-        except ET.ParseError as e:
-            logger.error(f"PMC XML parsing error: {e}")
-        except Exception as e:
-            logger.error(f"Unexpected error in PMC search: {e}")
+        # Step 3: Parse each summary record
+        for docsum in summary_root.findall('.//DocSum'):
+            try:
+                paper = self._parse_docsum(docsum)
+                if paper:
+                    papers.append(paper)
+                    if len(papers) >= max_results:
+                        break
+            except Exception as e:
+                logger.warning(f"Error parsing PMC summary: {e}")
+                continue
 
         return papers
+
+    @staticmethod
+    def _eutils_root(response: requests.Response, root_tag: str) -> ET.Element:
+        """Check an E-utilities reply and return its XML root, or raise."""
+        root = xml_root(response, "PMC", root_tag)
+        # A top-level <ERROR> means the whole request failed; per-record
+        # errors inside eSummaryResult are left for the DocSum loop to skip.
+        error = root.find('ERROR')
+        if root_tag == 'eSearchResult' and error is not None:
+            raise RuntimeError(f"PMC search failed: {(error.text or '').strip()}")
+        return root
 
     def _parse_docsum(self, docsum: ET.Element) -> Optional[Paper]:
         """Parse a single PMC eSummary DocSum element into a Paper object."""

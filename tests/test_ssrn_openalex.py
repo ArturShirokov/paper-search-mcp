@@ -105,6 +105,13 @@ def test_http_failures_are_not_zero_results(status):
         searcher(response(status=status)).search_ssrn("law")
 
 
+def test_rate_limit_carries_retry_after():
+    limited = response(status=429)
+    limited.headers = {"Retry-After": "31320"}
+    with pytest.raises(RuntimeError, match=r"HTTP 429 \(Retry-After: 31320\)"):
+        searcher(limited).search_ssrn("law")
+
+
 def test_later_page_failure_does_not_return_partial_as_success():
     search = searcher(payload([work()], "two"), response(status=503))
     with pytest.raises(RuntimeError, match="503"):

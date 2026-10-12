@@ -9,7 +9,7 @@ from pypdf import PdfReader
 
 from ..paper import Paper
 from ..utils import extract_doi
-from .base import PaperSource
+from .base import PaperSource, check_response, json_body
 
 logger = logging.getLogger(__name__)
 
@@ -62,26 +62,23 @@ class BioRxivSearcher(PaperSource):
         )
         return "interval", start_date, end_date, category
 
-    def _request_json(self, url: str) -> dict | None:
+    def _request_json(self, url: str) -> dict:
         for attempt in range(1, self.max_retries + 1):
             try:
                 response = self.session.get(url, timeout=self.timeout)
-                response.raise_for_status()
-                return response.json()
+                check_response(response, "bioRxiv")
+                data = json_body(response, "bioRxiv")
+                if not isinstance(data, dict):
+                    raise ValueError("bioRxiv returned an unexpected JSON reply")
+                return data
             except (requests.exceptions.RequestException, ValueError) as exc:
                 if attempt == self.max_retries:
-                    logger.warning(
-                        "bioRxiv request failed after %d attempts: %s",
-                        self.max_retries,
-                        exc,
-                    )
-                    return None
+                    raise
                 logger.info(
                     "bioRxiv request attempt %d failed; retrying: %s",
                     attempt,
                     exc,
                 )
-        return None
 
     @staticmethod
     def _parse_papers(collection: list) -> list[Paper]:
@@ -135,8 +132,6 @@ class BioRxivSearcher(PaperSource):
         mode, start, end, category = self._resolve_query_mode(query, days)
         if mode == "doi":
             data = self._request_json(f"{self.BASE_URL}/{start}/{end}/json")
-            if not data:
-                return []
             return self._parse_papers(data.get("collection") or [])[:max_results]
 
         papers: list[Paper] = []
@@ -147,9 +142,6 @@ class BioRxivSearcher(PaperSource):
                 url = f"{url}?{urlencode({'category': category})}"
 
             data = self._request_json(url)
-            if not data:
-                break
-
             collection = data.get("collection") or []
             if not collection:
                 break

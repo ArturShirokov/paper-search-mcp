@@ -20,7 +20,7 @@ import requests
 
 from ..config import get_env
 from ..paper import Paper
-from .base import PaperSource
+from .base import PaperSource, check_response
 
 BASE_URL = "https://chinarxiv.org"
 API_URL = f"{BASE_URL}/api/v1/papers"
@@ -87,7 +87,14 @@ class ChinaRxivSearcher(PaperSource):
         if response.status_code == 422:
             # The body names the bad parameter; raise_for_status would drop it.
             raise ValueError(f"ChinaRxiv rejected the request: {response.text[:300]}")
-        response.raise_for_status()
+        if response.status_code == 404:
+            # The detail tells "PDF not available for paper" from "Paper not found".
+            try:
+                detail = response.json().get("detail")
+            except (ValueError, AttributeError):
+                detail = None
+            raise ValueError(f"ChinaRxiv: {detail or f'nothing at {url}'}")
+        check_response(response, "ChinaRxiv")
         return response
 
     def _parse(self, record: Dict[str, Any]) -> Paper:

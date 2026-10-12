@@ -3,7 +3,6 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime
 import requests
 import logging
-import json
 import xml.etree.ElementTree as ET
 from urllib.parse import quote, urlencode
 from requests.exceptions import SSLError
@@ -12,7 +11,7 @@ import urllib3
 from ..paper import Paper
 from ..utils import extract_doi
 from ..config import get_env
-from .base import PaperSource
+from .base import PaperSource, check_response, json_body
 
 logger = logging.getLogger(__name__)
 
@@ -79,75 +78,70 @@ class CiteSeerXSearcher(PaperSource):
 
         Returns:
             List of Paper objects
+
+        Raises:
+            requests.RequestException: The request failed, CiteSeerX returned a
+                non-2xx status, or the API redirected to the web archive.
+            ValueError: CiteSeerX returned a reply that is not a search result.
         """
         papers = []
 
-        try:
-            # Prepare parameters for CiteSeerX API
-            params = {
-                'q': query,
-                'max': min(max_results, 100),  # CiteSeerX default max
-                'start': 0,
-                'sort': kwargs.get('sort', 'relevance')
-            }
+        # Prepare parameters for CiteSeerX API
+        params = {
+            'q': query,
+            'max': min(max_results, 100),  # CiteSeerX default max
+            'start': 0,
+            'sort': kwargs.get('sort', 'relevance')
+        }
 
-            # Add filters
-            if 'year' in kwargs:
-                year = kwargs['year']
-                if isinstance(year, str) and '-' in year:
-                    # Handle year range
-                    year_range = year.split('-')
-                    if len(year_range) == 2:
-                        params['year'] = f"{year_range[0]}-{year_range[1]}"
-                else:
-                    params['year'] = str(year)
+        # Add filters
+        if 'year' in kwargs:
+            year = kwargs['year']
+            if isinstance(year, str) and '-' in year:
+                # Handle year range
+                year_range = year.split('-')
+                if len(year_range) == 2:
+                    params['year'] = f"{year_range[0]}-{year_range[1]}"
+            else:
+                params['year'] = str(year)
 
-            if 'author' in kwargs:
-                params['author'] = kwargs['author']
+        if 'author' in kwargs:
+            params['author'] = kwargs['author']
 
-            if 'venue' in kwargs:
-                params['venue'] = kwargs['venue']
+        if 'venue' in kwargs:
+            params['venue'] = kwargs['venue']
 
-            if 'min_citations' in kwargs:
-                params['minCitations'] = kwargs['min_citations']
+        if 'min_citations' in kwargs:
+            params['minCitations'] = kwargs['min_citations']
 
-            logger.debug(f"Searching CiteSeerX with params: {params}")
+        logger.debug(f"Searching CiteSeerX with params: {params}")
 
-            response = self._get(self.SEARCH_API, params=params)
-            response.raise_for_status()
+        response = self._get(self.SEARCH_API, params=params)
+        check_response(response, "CiteSeerX")
 
-            data = response.json()
+        data = json_body(response, "CiteSeerX")
+        if not isinstance(data, dict):
+            raise ValueError("CiteSeerX returned an unexpected reply (not a JSON object)")
 
-            # CiteSeerX API returns results in 'result' field
-            results = data.get('result', {}).get('hits', {}).get('hit', [])
+        # CiteSeerX API returns results in 'result' field
+        results = data.get('result', {}).get('hits', {}).get('hit', [])
 
-            # Handle single result (API returns dict instead of list for single result)
-            if isinstance(results, dict):
-                results = [results]
+        # Handle single result (API returns dict instead of list for single result)
+        if isinstance(results, dict):
+            results = [results]
 
-            for result in results:
-                try:
-                    paper = self._parse_citeseerx_result(result)
-                    if paper:
-                        papers.append(paper)
-                        if len(papers) >= max_results:
-                            break
-                except Exception as e:
-                    logger.warning(f"Error parsing CiteSeerX result: {e}")
-                    continue
+        for result in results:
+            try:
+                paper = self._parse_citeseerx_result(result)
+                if paper:
+                    papers.append(paper)
+                    if len(papers) >= max_results:
+                        break
+            except Exception as e:
+                logger.warning(f"Error parsing CiteSeerX result: {e}")
+                continue
 
-            logger.info(f"Found {len(papers)} papers from CiteSeerX for query: {query}")
-
-        except requests.RequestException as e:
-            logger.error(f"CiteSeerX API request error: {e}")
-            if hasattr(e, 'response') and e.response is not None:
-                logger.error(f"Response status: {e.response.status_code}")
-                if e.response.status_code == 429:
-                    logger.warning("CiteSeerX rate limit exceeded")
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse CiteSeerX JSON response: {e}")
-        except Exception as e:
-            logger.error(f"Unexpected error in CiteSeerX search: {e}")
+        logger.info(f"Found {len(papers)} papers from CiteSeerX for query: {query}")
 
         return papers
 

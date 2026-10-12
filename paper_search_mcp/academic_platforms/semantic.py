@@ -9,7 +9,7 @@ import time
 import random
 from ..paper import Paper
 from ..utils import extract_doi
-from .base import PaperSource
+from .base import PaperSource, json_body, retry_hint
 import logging
 from pypdf import PdfReader
 import re
@@ -203,7 +203,8 @@ class SemanticSearcher(PaperSource):
                         return {
                             "error": "rate_limited",
                             "status_code": 429,
-                            "message": "Too many requests. Set SEMANTIC_SCHOLAR_API_KEY for higher limits.",
+                            "message": "Too many requests. Set SEMANTIC_SCHOLAR_API_KEY for higher limits."
+                            + retry_hint(response),
                         }
                     if attempt < max_retries - 1:
                         retry_after = response.headers.get("Retry-After")
@@ -224,7 +225,7 @@ class SemanticSearcher(PaperSource):
                         return {
                             "error": "rate_limited",
                             "status_code": 429,
-                            "message": "Too many requests. Please wait before retrying.",
+                            "message": "Too many requests. Please wait before retrying." + retry_hint(response),
                         }
 
                 response.raise_for_status()
@@ -251,7 +252,8 @@ class SemanticSearcher(PaperSource):
                         return {
                             "error": "rate_limited",
                             "status_code": 429,
-                            "message": "Too many requests. Set SEMANTIC_SCHOLAR_API_KEY for higher limits.",
+                            "message": "Too many requests. Set SEMANTIC_SCHOLAR_API_KEY for higher limits."
+                            + retry_hint(e.response),
                         }
                     if attempt < max_retries - 1:
                         retry_after = e.response.headers.get("Retry-After")
@@ -272,7 +274,7 @@ class SemanticSearcher(PaperSource):
                         return {
                             "error": "rate_limited",
                             "status_code": 429,
-                            "message": "Too many requests. Please wait before retrying.",
+                            "message": "Too many requests. Please wait before retrying." + retry_hint(e.response),
                         }
                 else:
                     logger.error(f"HTTP Error requesting API: {e}")
@@ -317,78 +319,75 @@ class SemanticSearcher(PaperSource):
         """
         papers = []
 
-        try:
-            fields = [
-                "title",
-                "abstract",
-                "year",
-                "citationCount",
-                "authors",
-                "url",
-                "publicationDate",
-                "externalIds",
-                "fieldsOfStudy",
-                "openAccessPdf",
-            ]
-            # Construct search parameters
-            params = {
-                "query": query,
-                "limit": max_results,
-                "fields": ",".join(fields),
-            }
-            if year:
-                params["year"] = year
-            # Make request
-            response = self.request_api("paper/search", params)
+        fields = [
+            "title",
+            "abstract",
+            "year",
+            "citationCount",
+            "authors",
+            "url",
+            "publicationDate",
+            "externalIds",
+            "fieldsOfStudy",
+            "openAccessPdf",
+        ]
+        # Construct search parameters
+        params = {
+            "query": query,
+            "limit": max_results,
+            "fields": ",".join(fields),
+        }
+        if year:
+            params["year"] = year
+        # Make request
+        response = self.request_api("paper/search", params)
 
-            # Check for errors
-            if isinstance(response, dict) and "error" in response:
-                error_msg = response.get("message", "Unknown error")
-                if response.get("error") == "rate_limited":
-                    logger.error(f"Rate limited by Semantic Scholar API: {error_msg}")
-                else:
-                    logger.error(f"Semantic Scholar API error: {error_msg}")
-                status_code = response.get("status_code")
-                reason = response.get("error")
-                if status_code:
-                    reason = f"{reason}, HTTP {status_code}"
-                raise SemanticScholarRequestError(
-                    f"Semantic Scholar API request failed ({reason}): {error_msg}"
-                )
+        # Check for errors
+        if isinstance(response, dict) and "error" in response:
+            error_msg = response.get("message", "Unknown error")
+            if response.get("error") == "rate_limited":
+                logger.error(f"Rate limited by Semantic Scholar API: {error_msg}")
+            else:
+                logger.error(f"Semantic Scholar API error: {error_msg}")
+            status_code = response.get("status_code")
+            reason = response.get("error")
+            if status_code:
+                reason = f"{reason}, HTTP {status_code}"
+            raise SemanticScholarRequestError(
+                f"Semantic Scholar API request failed ({reason}): {error_msg}"
+            )
 
-            # Check response status code
-            if not hasattr(response, "status_code") or response.status_code != 200:
-                status_code = getattr(response, "status_code", "unknown")
-                logger.error(
-                    f"Semantic Scholar search failed with status {status_code}"
-                )
-                raise SemanticScholarRequestError(
-                    f"Semantic Scholar search failed with status {status_code}"
-                )
+        # Check response status code
+        if not hasattr(response, "status_code") or response.status_code != 200:
+            status_code = getattr(response, "status_code", "unknown")
+            logger.error(
+                f"Semantic Scholar search failed with status {status_code}"
+            )
+            raise SemanticScholarRequestError(
+                f"Semantic Scholar search failed with status {status_code}"
+            )
 
-            data = response.json()
-            results = data["data"]
+        data = json_body(response, "Semantic Scholar")
+        # A search with no hits comes back as {"total": 0, "offset": 0}, without "data".
+        if not isinstance(data, dict) or ("data" not in data and data.get("total") != 0):
+            raise ValueError("Semantic Scholar reply has no 'data' list")
+        results = data.get("data")
 
-            if not results:
-                logger.info("No results found for the query")
-                return papers
+        if not results:
+            logger.info("No results found for the query")
+            return papers
 
-            # Process each result
-            for i, item in enumerate(results):
-                if len(papers) >= max_results:
-                    break
+        # Process each result
+        for i, item in enumerate(results):
+            if len(papers) >= max_results:
+                break
 
-                logger.info(
-                    f"Processing paper {i + 1}/{min(len(results), max_results)}"
-                )
-                paper = self._parse_paper(item)
-                if paper:
-                    papers.append(paper)
-
-        except SemanticScholarRequestError:
-            raise
-        except Exception as e:
-            logger.error(f"Semantic Scholar search error: {e}")
+            logger.info(
+                f"Processing paper {i + 1}/{min(len(results), max_results)}"
+            )
+            paper = self._parse_paper(item)
+            if paper:
+                papers.append(paper)
 
         return papers[:max_results]
 

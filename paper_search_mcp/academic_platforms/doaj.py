@@ -16,7 +16,7 @@ from urllib.parse import quote
 from ..paper import Paper
 from ..utils import extract_doi
 from ..config import get_env
-from .base import PaperSource
+from .base import PaperSource, check_response, json_body
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +70,11 @@ class DOAJSearcher(PaperSource):
 
         Returns:
             List of Paper objects
+
+        Raises:
+            requests.RequestException: The request failed or DOAJ returned a non-2xx status.
+            ValueError: DOAJ returned a non-JSON reply.
+            RuntimeError: DOAJ returned an error envelope.
         """
         if max_results > 100:
             max_results = 100  # DOAJ API limit per request
@@ -80,70 +85,59 @@ class DOAJSearcher(PaperSource):
         page_size = min(max_results, 100)  # DOAJ max page size
         page = 1
 
-        try:
-            # Build Lucene query
-            lucene_query = self._build_lucene_query(query, kwargs)
+        # Build Lucene query
+        lucene_query = self._build_lucene_query(query, kwargs)
 
-            params = {
-                'page': page,
-                'pageSize': page_size,
-                'query': lucene_query
-            }
+        params = {
+            'page': page,
+            'pageSize': page_size,
+            'query': lucene_query
+        }
 
-            # Add sorting
-            if 'sort' in kwargs:
-                params['sort'] = kwargs['sort']
-                if 'sort_dir' in kwargs and kwargs['sort_dir'] in ('asc', 'desc'):
-                    params['sort_dir'] = kwargs['sort_dir']
+        # Add sorting
+        if 'sort' in kwargs:
+            params['sort'] = kwargs['sort']
+            if 'sort_dir' in kwargs and kwargs['sort_dir'] in ('asc', 'desc'):
+                params['sort_dir'] = kwargs['sort_dir']
 
-            # Make request to DOAJ API
-            encoded_query = quote(query.strip() or "*", safe="")
-            search_url = f"{self.BASE_URL}/search/articles/{encoded_query}"
-            response = self.session.get(
-                search_url,
-                params=params,
-                timeout=30
-            )
-            response.raise_for_status()
+        # Make request to DOAJ API
+        encoded_query = quote(query.strip() or "*", safe="")
+        search_url = f"{self.BASE_URL}/search/articles/{encoded_query}"
+        response = self.session.get(
+            search_url,
+            params=params,
+            timeout=30
+        )
+        check_response(response, "DOAJ")
 
-            data = response.json()
+        data = json_body(response, "DOAJ")
 
-            # Check for API errors
-            if 'error' in data:
-                logger.error(f"DOAJ API error: {data['error']}")
-                return papers
+        # Check for API errors
+        if not isinstance(data, dict):
+            raise ValueError("DOAJ returned an unexpected reply (not a JSON object)")
+        if 'error' in data:
+            raise RuntimeError(f"DOAJ API error: {data['error']}")
 
-            total = data.get('total', 0)
-            logger.info(f"DOAJ search found {total} total results")
+        total = data.get('total', 0)
+        logger.info(f"DOAJ search found {total} total results")
 
-            # Parse results
-            results = data.get('results', [])
-            for item in results:
-                if len(papers) >= max_results:
-                    break
+        # Parse results
+        results = data.get('results', [])
+        for item in results:
+            if len(papers) >= max_results:
+                break
 
-                try:
-                    paper = self._parse_doaj_item(item)
-                    if paper:
-                        papers.append(paper)
-                except Exception as e:
-                    logger.warning(f"Error parsing DOAJ item: {e}")
-                    continue
+            try:
+                paper = self._parse_doaj_item(item)
+                if paper:
+                    papers.append(paper)
+            except Exception as e:
+                logger.warning(f"Error parsing DOAJ item: {e}")
+                continue
 
-            # Rate limiting - be polite to DOAJ API
-            # Public access: 100 requests/hour, API key: higher limits
-            time.sleep(0.5 if self.api_key else 1.0)
-
-        except requests.exceptions.RequestException as e:
-            logger.error(f"DOAJ API request failed: {e}")
-            if hasattr(e, 'response') and e.response is not None:
-                logger.error(f"Response status: {e.response.status_code}")
-                if e.response.status_code == 429:
-                    logger.warning("DOAJ rate limit exceeded. Consider using API key.")
-        except ValueError as e:
-            logger.error(f"Failed to parse DOAJ JSON response: {e}")
-        except Exception as e:
-            logger.error(f"Unexpected error in DOAJ search: {e}")
+        # Rate limiting - be polite to DOAJ API
+        # Public access: 100 requests/hour, API key: higher limits
+        time.sleep(0.5 if self.api_key else 1.0)
 
         return papers[:max_results]
 

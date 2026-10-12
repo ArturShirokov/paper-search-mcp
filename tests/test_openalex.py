@@ -1,6 +1,8 @@
 import asyncio
 import os
 import unittest
+
+import requests
 from unittest.mock import AsyncMock, Mock, patch
 
 from paper_search_mcp import server
@@ -143,13 +145,13 @@ class TestOpenAlexSearcher(unittest.TestCase):
         self.assertEqual(paper.published_date.year, 2024)
         self.assertEqual(paper.citations, 7)
 
-    def test_non_success_response_returns_no_results(self):
-        self.searcher.session.get = Mock(return_value=self._response(status_code=429))
+    def test_non_success_response_raises(self):
+        response = self._response(status_code=429)
+        response.headers = {}
+        self.searcher.session.get = Mock(return_value=response)
 
-        self.assertEqual(
-            self.searcher.search("machine learning", filter="publication_year:2024"),
-            [],
-        )
+        with self.assertRaises(requests.HTTPError):
+            self.searcher.search("machine learning", filter="publication_year:2024")
 
     def test_user_agent_header(self):
         user_agent = self.searcher.session.headers.get("User-Agent", "")

@@ -19,6 +19,7 @@ def response_with(content: bytes, status_code: int = 200):
     response = Mock(spec=requests.Response)
     response.content = content
     response.status_code = status_code
+    response.headers = {}
     return response
 
 
@@ -82,7 +83,20 @@ class TestArxivRateLimiting(unittest.TestCase):
             [(1.5,), (3.0,)],
         )
 
-    def test_network_failure_keeps_existing_empty_result_behavior(self):
+    def test_http_429_error_carries_retry_after(self):
+        limited = response_with(b"", status_code=429)
+        limited.headers = {"Retry-After": "20"}
+        searcher = ArxivSearcher()
+        searcher.session.get = Mock(return_value=limited)
+
+        with (
+            patch.object(ArxivSearcher, "_pace_locked"),
+            patch("paper_search_mcp.academic_platforms.arxiv.time.sleep"),
+            self.assertRaisesRegex(requests.RequestException, r"Retry-After: 20"),
+        ):
+            searcher.search("test")
+
+    def test_network_failure_raises_after_retries(self):
         searcher = ArxivSearcher()
         searcher.session.get = Mock(
             side_effect=requests.ConnectionError("offline")
@@ -91,8 +105,9 @@ class TestArxivRateLimiting(unittest.TestCase):
         with (
             patch.object(ArxivSearcher, "_pace_locked"),
             patch("paper_search_mcp.academic_platforms.arxiv.time.sleep") as wait,
+            self.assertRaisesRegex(requests.ConnectionError, "offline"),
         ):
-            self.assertEqual(searcher.search("test"), [])
+            searcher.search("test")
 
         self.assertEqual(searcher.session.get.call_count, 3)
         self.assertEqual(

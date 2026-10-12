@@ -5,7 +5,7 @@ from bs4 import BeautifulSoup
 import random
 from ..paper import Paper
 from ..utils import extract_doi
-from .base import PaperSource
+from .base import PaperSource, check_response
 import logging
 from pypdf import PdfReader
 import os
@@ -155,45 +155,37 @@ class IACRSearcher(PaperSource):
         """
         papers = []
 
-        try:
-            # Construct search parameters
-            params = {"q": query}
+        response = self.session.get(
+            self.IACR_SEARCH_URL,
+            params={"q": query},
+            timeout=self.REQUEST_TIMEOUT_SECONDS,
+        )
+        check_response(response, "IACR")
 
-            # Make request
-            response = self.session.get(
-                self.IACR_SEARCH_URL,
-                params=params,
-                timeout=self.REQUEST_TIMEOUT_SECONDS,
+        # Parse results
+        soup = BeautifulSoup(response.text, "html.parser")
+
+        # Find all paper entries - they are divs with class "mb-4"
+        results = soup.find_all("div", class_="mb-4")
+
+        if not results:
+            # A genuine no-hit page says so in an <h4>; anything else is a
+            # changed or error page, not zero results.
+            if any(h4.get_text(strip=True) == "No results" for h4 in soup.find_all("h4")):
+                return papers
+            raise ValueError("IACR returned a page with neither results nor a 'No results' notice")
+
+        # Process each result
+        for i, item in enumerate(results):
+            if len(papers) >= max_results:
+                break
+
+            logger.info(
+                f"Processing paper {i + 1}/{min(len(results), max_results)}"
             )
-
-            if response.status_code != 200:
-                logger.error(f"IACR search failed with status {response.status_code}")
-                return papers
-
-            # Parse results
-            soup = BeautifulSoup(response.text, "html.parser")
-
-            # Find all paper entries - they are divs with class "mb-4"
-            results = soup.find_all("div", class_="mb-4")
-
-            if not results:
-                logger.info("No results found for the query")
-                return papers
-
-            # Process each result
-            for i, item in enumerate(results):
-                if len(papers) >= max_results:
-                    break
-
-                logger.info(
-                    f"Processing paper {i + 1}/{min(len(results), max_results)}"
-                )
-                paper = self._parse_paper(item, fetch_details=fetch_details)
-                if paper:
-                    papers.append(paper)
-
-        except Exception as e:
-            logger.error(f"IACR search error: {e}")
+            paper = self._parse_paper(item, fetch_details=fetch_details)
+            if paper:
+                papers.append(paper)
 
         return papers[:max_results]
 

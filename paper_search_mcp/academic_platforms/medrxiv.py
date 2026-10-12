@@ -4,7 +4,7 @@ import requests
 import os
 from datetime import datetime, timedelta
 from ..paper import Paper
-from .base import PaperSource
+from .base import PaperSource, check_response, json_body
 from pypdf import PdfReader
 
 logger = logging.getLogger(__name__)
@@ -50,8 +50,8 @@ class MedRxivSearcher(PaperSource):
             while tries < self.max_retries:
                 try:
                     response = self.session.get(url, timeout=self.timeout)
-                    response.raise_for_status()
-                    data = response.json()
+                    check_response(response, "medRxiv")
+                    data = json_body(response, "medRxiv")
                     collection = data.get('collection', [])
                     for item in collection:
                         try:
@@ -79,8 +79,7 @@ class MedRxivSearcher(PaperSource):
                 except requests.exceptions.RequestException as e:
                     tries += 1
                     if tries == self.max_retries:
-                        logger.error("Failed to connect to medRxiv API after %s attempts: %s", self.max_retries, e)
-                        break
+                        raise
                     logger.warning("Attempt %s failed, retrying...", tries)
             else:
                 continue

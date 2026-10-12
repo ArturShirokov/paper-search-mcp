@@ -1,6 +1,7 @@
 import unittest
 import os
 import requests
+from unittest.mock import Mock
 from paper_search_mcp.academic_platforms.iacr import IACRSearcher
 
 
@@ -301,6 +302,44 @@ class TestIACRSearcher(unittest.TestCase):
             print(
                 f"  Detailed - Keywords: {len(detailed_paper.keywords)}, Abstract: {len(detailed_paper.abstract)} chars"
             )
+
+
+class TestIACRSearchErrors(unittest.TestCase):
+    """Failed or unreadable searches must raise, not look like zero results (#5)."""
+
+    @staticmethod
+    def _reply(status=200, text="", headers=None):
+        response = Mock(status_code=status, text=text)
+        response.headers = headers or {}
+        return response
+
+    def setUp(self):
+        self.searcher = IACRSearcher()
+
+    def test_http_error_raises_with_retry_after(self):
+        self.searcher.session.get = Mock(
+            return_value=self._reply(429, headers={"Retry-After": "60"})
+        )
+        with self.assertRaisesRegex(requests.HTTPError, "IACR returned HTTP 429 .Retry-After: 60"):
+            self.searcher.search("lattice")
+
+    def test_network_error_raises(self):
+        self.searcher.session.get = Mock(side_effect=requests.ConnectionError("down"))
+        with self.assertRaises(requests.ConnectionError):
+            self.searcher.search("lattice")
+
+    def test_page_without_results_or_no_hit_marker_raises(self):
+        self.searcher.session.get = Mock(
+            return_value=self._reply(text="<html><body>Maintenance</body></html>")
+        )
+        with self.assertRaisesRegex(ValueError, "IACR"):
+            self.searcher.search("lattice")
+
+    def test_genuine_no_results_page_is_empty(self):
+        self.searcher.session.get = Mock(return_value=self._reply(
+            text='<div class="col-12"><h4 class="mt-5">No results</h4></div>'
+        ))
+        self.assertEqual(self.searcher.search("zzqxqzv"), [])
 
 
 if __name__ == "__main__":

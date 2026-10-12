@@ -5,7 +5,7 @@ import requests
 from ..paper import Paper
 from ..utils import extract_doi
 from ..config import get_env
-from .base import PaperSource
+from .base import PaperSource, check_response, json_body
 
 logger = logging.getLogger(__name__)
 
@@ -150,32 +150,25 @@ class UnpaywallResolver:
         if not self.email or not doi:
             return None
 
-        try:
-            response = self.session.get(
-                f"{self.BASE_URL}/{doi}",
-                params={"email": self.email},
-                timeout=20,
+        response = self.session.get(
+            f"{self.BASE_URL}/{doi}",
+            params={"email": self.email},
+            timeout=20,
+        )
+
+        if response.status_code == 404:
+            return None
+
+        if response.status_code == 422:
+            # The message leaves the email out; it is the user's contact address.
+            raise requests.HTTPError(
+                "Unpaywall rejected the configured email (HTTP 422). Use a valid contact "
+                "email in PAPER_SEARCH_MCP_UNPAYWALL_EMAIL/UNPAYWALL_EMAIL.",
+                response=response,
             )
 
-            if response.status_code == 404:
-                return None
-
-            if response.status_code == 422:
-                logger.warning(
-                    "Unpaywall rejected the configured email (%s) with HTTP 422. "
-                    "Please use a valid contact email in PAPER_SEARCH_MCP_UNPAYWALL_EMAIL/UNPAYWALL_EMAIL.",
-                    self.email,
-                )
-                return None
-
-            response.raise_for_status()
-            return response.json()
-        except requests.RequestException as exc:
-            logger.warning("Unpaywall request failed for DOI %s: %s", doi, exc)
-            return None
-        except Exception as exc:
-            logger.warning("Unexpected Unpaywall record fetch error for DOI %s: %s", doi, exc)
-            return None
+        check_response(response, "Unpaywall")
+        return json_body(response, "Unpaywall")
 
     def has_api_access(self) -> bool:
         """Quick capability check based on required configuration."""

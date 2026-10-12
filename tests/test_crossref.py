@@ -150,3 +150,55 @@ class TestCrossRefSearcher(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+# --- failures must raise, not look like zero results (#5) --------------------
+from unittest.mock import Mock, patch
+
+import pytest
+
+
+def _reply(status=200, json_data=None, headers=None):
+    response = Mock(status_code=status)
+    response.headers = headers or {}
+    if json_data is None:
+        response.json.side_effect = requests.JSONDecodeError("Expecting value", "", 0)
+    else:
+        response.json.return_value = json_data
+    return response
+
+
+def test_search_429_after_retry_raises_with_retry_after():
+    searcher = CrossRefSearcher()
+    searcher.session.get = Mock(return_value=_reply(429, headers={"Retry-After": "60"}))
+    with patch("paper_search_mcp.academic_platforms.crossref.time.sleep"):
+        with pytest.raises(requests.HTTPError, match="CrossRef returned HTTP 429.*Retry-After: 60"):
+            searcher.search("graphs")
+    assert searcher.session.get.call_count == 2
+
+
+def test_search_network_error_raises():
+    searcher = CrossRefSearcher()
+    searcher.session.get = Mock(side_effect=requests.ConnectionError("down"))
+    with pytest.raises(requests.ConnectionError):
+        searcher.search("graphs")
+
+
+def test_search_non_json_raises():
+    searcher = CrossRefSearcher()
+    searcher.session.get = Mock(return_value=_reply(headers={"Content-Type": "text/html"}))
+    with pytest.raises(ValueError, match="CrossRef returned a non-JSON reply"):
+        searcher.search("graphs")
+
+
+def test_search_wrong_shape_raises():
+    searcher = CrossRefSearcher()
+    searcher.session.get = Mock(return_value=_reply(json_data={"status": "failed"}))
+    with pytest.raises(ValueError, match="CrossRef"):
+        searcher.search("graphs")
+
+
+def test_search_genuine_empty_is_empty():
+    searcher = CrossRefSearcher()
+    searcher.session.get = Mock(return_value=_reply(json_data={"message": {"items": []}}))
+    assert searcher.search("graphs") == []

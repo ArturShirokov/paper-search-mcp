@@ -148,7 +148,7 @@ def test_concurrent_search_parse_errors_leave_stdout_untouched(
         assert sys.stdout is original_stdout
         rendezvous.wait()
         assert sys.stdout is original_stdout
-        response = Mock(status_code=200, content=b"mock feed")
+        response = Mock(status_code=200, content=b'<feed xmlns="http://www.w3.org/2005/Atom"/>')
         response.json.return_value = {"collection": [{}]}
         return response
 
@@ -177,9 +177,10 @@ def test_search_retry_and_terminal_error_leave_json_clean(monkeypatch, capsys, c
 
     assert run_command("search", "biology", "-s", "medrxiv") == 0
 
-    assert json.loads(capsys.readouterr().out)["total"] == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["total"] == 0
+    assert output["errors"] == {"medrxiv": "offline"}
     assert "Attempt 1 failed, retrying..." in caplog.text
-    assert "Failed to connect to medRxiv API after 3 attempts: offline" in caplog.text
 
 
 @pytest.mark.parametrize("module", [biorxiv, medrxiv])
@@ -274,6 +275,6 @@ cli.main()
     assert "Attempt 1 failed, retrying..." in result.stderr
     if command == "search":
         assert payload["total"] == 0
-        assert "Failed to connect to medRxiv API" in result.stderr
+        assert payload["errors"] == {"medrxiv": "offline"}
     else:
         assert payload["status"] == "error"

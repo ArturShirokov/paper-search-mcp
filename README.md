@@ -103,7 +103,7 @@ This matrix reflects **verified live-integration results** from functional and e
 | IACR | ✅ | ✅ | ✅ | Open API; reliable |
 | Semantic Scholar | ✅ | ✅ (OA) | ✅ (OA) | Works without key (rate-limited); key improves limits; key rejection (403) retried automatically without key |
 | Crossref | ✅ | ❌ | ⚠️ info-only | Open API; reliable |
-| OpenAlex | ✅ | ❌ | ⚠️ info-only | Open API; free API key improves daily limits |
+| OpenAlex | ✅ | ❌ | ⚠️ info-only | Keyless budget is about 100 searches/day (1,000 credits, 10 per search); set `PAPER_SEARCH_MCP_OPENALEX_API_KEY` (free) for more |
 | PMC | ✅ | ✅ (OA only) | ✅ (OA only) | OA PDFs only; direct download may be blocked by some proxy environments |
 | CORE | ✅ | ✅ (record-dependent) | ✅ (record-dependent) | Free key recommended; connector retries with backoff and falls back to key-less on 401/403 |
 | Europe PMC | ✅ | ✅ (OA) | ✅ (OA) | OA PDFs only; direct download may be blocked by some proxy environments |
@@ -111,7 +111,7 @@ This matrix reflects **verified live-integration results** from functional and e
 | OpenAIRE | ✅ | ❌ | ❌ | Open API; retries 3× with escalating request profiles on transient 403 |
 | CiteSeerX | ⚠️ | ✅ (record-dependent) | ⚠️ | API endpoint intermittently unavailable / redirects to web archive |
 | DOAJ | ✅ | ⚠️ (URL-dependent) | ⚠️ (URL-dependent) | PDF availability varies by article; free key raises rate limits |
-| BASE | ⚠️ | ✅ (record-dependent) | ✅ (record-dependent) | OAI-PMH endpoint requires institutional IP registration; returns empty gracefully otherwise |
+| BASE | ⚠️ | ✅ (record-dependent) | ✅ (record-dependent) | OAI-PMH endpoint requires institutional IP registration; unregistered callers get an "Access denied" source error |
 | Zenodo | ✅ | ✅ (record-dependent) | ✅ (record-dependent) | Open API; reliable |
 | HAL | ✅ | ✅ (record-dependent) | ✅ (record-dependent) | Open API; reliable |
 | Jxiv | ✅ | ✅ | ✅ | Japanese preprints (OPS); keyless; `list_new_jxiv` harvests by date via OAI-PMH |
@@ -158,11 +158,11 @@ Some search failures are caused by external provider instability, not by bugs in
 |---|---|---|---|
 | Google Scholar | Source error for HTTP/network failures, CAPTCHA, or persistent consent pages | Upstream rate limits, access checks, or connectivity | Reduce request frequency or use another public source; CAPTCHA is not solved automatically |
 | Semantic Scholar | 429 rate-limited responses | Anonymous access rate limit | Set `PAPER_SEARCH_MCP_SEMANTIC_SCHOLAR_API_KEY`; if key is rejected (403) connector automatically retries without key |
-| OpenAlex | 403/429 or daily quota errors | Anonymous access daily limit | Set `PAPER_SEARCH_MCP_OPENALEX_API_KEY` |
+| OpenAlex | `OpenAlex returned HTTP 429 (Retry-After: …)` in `errors` | Keyless daily budget (about 100 searches) spent; Retry-After is in seconds and can be hours | Set `PAPER_SEARCH_MCP_OPENALEX_API_KEY` |
 | CORE | 500 / timeout errors | Unauthenticated rate limiting | Set `PAPER_SEARCH_MCP_CORE_API_KEY` (free); connector retries with exponential backoff and falls back to key-less on 401/403 |
 | OpenAIRE | Transient 403 responses | IP-based session rate limiting | Connector retries 3× per profile, escalating: plain session → XML Accept header → raw `requests.get` with Mozilla UA |
-| CiteSeerX | 404 via web archive redirect | PSU endpoint intermittently redirects to archive | No workaround; connector returns empty gracefully |
-| BASE | Search returns 0 results | OAI-PMH endpoint requires institutional IP registration | Register at [base-search.net](https://www.base-search.net/about/en/) for API access; connector returns empty gracefully otherwise |
+| CiteSeerX | 404 via web archive redirect | PSU endpoint intermittently redirects to archive | No workaround; reported as a source error |
+| BASE | `OAI-PMH error notOAIPMH: Access denied …` in `errors` | OAI-PMH endpoint requires institutional IP registration | Register at [base-search.net](https://www.base-search.net/about/en/) for API access |
 | SSRN full text | HTTP 403 or identity unavailable | Public page/PDF delivery may be restricted | Search uses OpenAlex; download reports failure without login, redirects or HTML search fallback |
 | PMC / Europe PMC | PDF download ProxyError | Local proxy blocking direct HTTPS PDF download | Disable proxy or use `download_with_fallback` instead |
 | Unpaywall | Skipped entirely | `UNPAYWALL_EMAIL` env var not set | Set `PAPER_SEARCH_MCP_UNPAYWALL_EMAIL` in `~/.config/paper-search-mcp/.env` |

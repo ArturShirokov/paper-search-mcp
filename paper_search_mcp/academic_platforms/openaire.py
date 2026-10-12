@@ -11,7 +11,7 @@ from requests.exceptions import SSLError
 from ..paper import Paper
 from ..utils import extract_doi
 from ..config import get_env
-from .base import PaperSource
+from .base import PaperSource, check_response, json_body
 
 logger = logging.getLogger(__name__)
 
@@ -102,9 +102,9 @@ class OpenAiresearcher(PaperSource):
                             wait_seconds,
                         )
                         time.sleep(wait_seconds)
-                        continue
 
-                    response.raise_for_status()
+                    # A retryable status raises here too, so it ends up as last_error.
+                    check_response(response, "OpenAIRE")
                     root = ET.fromstring(response.content)
                     papers: List[Paper] = []
                     result_nodes = self._find_top_level_results(root)
@@ -120,9 +120,7 @@ class OpenAiresearcher(PaperSource):
                 except Exception as exc:
                     last_error = exc
 
-        if last_error:
-            raise last_error
-        return []
+        raise last_error
 
     @staticmethod
     def _local_name(tag: Any) -> str:
@@ -286,8 +284,7 @@ class OpenAiresearcher(PaperSource):
         Returns:
             List of Paper objects
         """
-        papers: List[Paper] = []
-
+        v2_error: Optional[Exception] = None
         try:
             papers = self._search_with_retry(query, max_results, **kwargs)
             logger.info(f"Found {len(papers)} papers from OpenAIRE for query: {query}")
@@ -295,8 +292,10 @@ class OpenAiresearcher(PaperSource):
                 return papers
         except Exception as exc:
             logger.warning("OpenAIRE v2 XML search failed, attempting legacy parser fallback: %s", exc)
+            v2_error = exc
 
         # Legacy fallback path (may not be available in some environments)
+        papers = []
         try:
             params = {
                 'size': min(max_results, 100),
@@ -304,8 +303,8 @@ class OpenAiresearcher(PaperSource):
                 'query': query,
             }
             response = self._get(f"{self.BASE_URL}/search/publications", params=params)
-            response.raise_for_status()
-            data = response.json()
+            check_response(response, "OpenAIRE")
+            data = json_body(response, "OpenAIRE")
             results = data.get('response', {}).get('results', {}).get('result', [])
             if isinstance(results, dict):
                 results = [results]
@@ -316,9 +315,14 @@ class OpenAiresearcher(PaperSource):
                 if len(papers) >= max_results:
                     break
         except Exception as exc:
-            logger.error("OpenAIRE API request error: %s", exc)
+            logger.error("OpenAIRE legacy fallback failed: %s", exc)
+            papers = []
 
-        return papers
+        if papers or v2_error is None:
+            # A legacy failure after an empty v2 answer leaves that answer standing.
+            return papers
+        # Nothing from either route: report the v2 failure, not "no results".
+        raise v2_error
 
     def _parse_openaire_xml_result(self, node: ET.Element) -> Optional[Paper]:
         """Parse OpenAIRE researchProducts XML result element."""

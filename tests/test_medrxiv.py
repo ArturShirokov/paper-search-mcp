@@ -1,6 +1,7 @@
 import unittest
 import os
 import requests
+from unittest.mock import Mock
 from paper_search_mcp.academic_platforms.medrxiv import MedRxivSearcher
 
 def check_api_accessible():
@@ -10,6 +11,39 @@ def check_api_accessible():
         return response.status_code == 200
     except:
         return False
+
+class TestMedRxivSearchErrors(unittest.TestCase):
+    """Failed requests must raise, not look like zero results (#5)."""
+
+    def setUp(self):
+        self.searcher = MedRxivSearcher()
+
+    def test_http_error_raises_with_retry_after(self):
+        self.searcher.session.get = Mock(
+            return_value=Mock(status_code=429, headers={"Retry-After": "60"})
+        )
+        with self.assertRaisesRegex(requests.HTTPError, r"medRxiv returned HTTP 429 \(Retry-After: 60\)"):
+            self.searcher.search("epidemiology")
+        self.assertEqual(self.searcher.session.get.call_count, self.searcher.max_retries)
+
+    def test_network_error_raises(self):
+        self.searcher.session.get = Mock(side_effect=requests.ConnectionError("down"))
+        with self.assertRaises(requests.ConnectionError):
+            self.searcher.search("epidemiology")
+
+    def test_non_json_reply_raises(self):
+        bad = Mock(status_code=200, headers={"Content-Type": "text/html"})
+        bad.json.side_effect = requests.JSONDecodeError("Expecting value", "", 0)
+        self.searcher.session.get = Mock(return_value=bad)
+        with self.assertRaisesRegex(ValueError, "medRxiv returned a non-JSON reply"):
+            self.searcher.search("epidemiology")
+
+    def test_genuine_empty_result_is_empty(self):
+        ok = Mock(status_code=200, headers={})
+        ok.json.return_value = {"collection": []}
+        self.searcher.session.get = Mock(return_value=ok)
+        self.assertEqual(self.searcher.search("epidemiology"), [])
+
 
 class TestMedRxivSearcher(unittest.TestCase):
     @classmethod

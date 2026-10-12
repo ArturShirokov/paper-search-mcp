@@ -17,7 +17,7 @@ import requests
 
 from ..config import get_env
 from ..paper import Paper
-from .base import PaperSource
+from .base import PaperSource, check_response, json_body
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +68,10 @@ class ZenodoSearcher(PaperSource):
 
         Returns:
             List of :class:`~paper_search_mcp.paper.Paper` objects.
+
+        Raises:
+            requests.RequestException: The request failed or Zenodo returned a non-2xx status.
+            ValueError: Zenodo returned a reply that is not a search result.
         """
         max_results = max(1, min(max_results, 200))
 
@@ -93,18 +97,16 @@ class ZenodoSearcher(PaperSource):
         if year:
             params["q"] = f"{query} AND publication_date:[{year}-01-01 TO {year}-12-31]"
 
-        try:
-            response = self.session.get(
-                f"{self.BASE_URL}/records", params=params, timeout=20
-            )
-            response.raise_for_status()
-            data = response.json()
-        except Exception as exc:
-            logger.error("Zenodo search failed: %s", exc)
-            return []
+        response = self.session.get(
+            f"{self.BASE_URL}/records", params=params, timeout=20
+        )
+        check_response(response, "Zenodo")
+        data = json_body(response, "Zenodo")
+        if not isinstance(data, dict) or not isinstance(data.get("hits"), dict):
+            raise ValueError("Zenodo returned an unexpected reply (no 'hits' object)")
 
         papers: List[Paper] = []
-        for hit in data.get("hits", {}).get("hits", []):
+        for hit in data["hits"].get("hits", []):
             paper = self._parse_record(hit)
             if paper:
                 papers.append(paper)

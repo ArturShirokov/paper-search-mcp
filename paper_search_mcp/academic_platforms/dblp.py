@@ -9,7 +9,7 @@ from bs4 import BeautifulSoup
 
 from ..paper import Paper
 from ..utils import extract_doi
-from .base import PaperSource
+from .base import PaperSource, check_response, xml_root
 
 logger = logging.getLogger(__name__)
 
@@ -74,21 +74,13 @@ class DBLPSearcher(PaperSource):
 
             logger.debug(f"Searching dblp with query: {params['q']}")
 
-            response = None
             for attempt in range(3):
                 response = self.session.get(self.BASE_URL, params=params, timeout=30)
-                if response.status_code == 200:
-                    break
                 if response.status_code >= 500 and attempt < 2:
                     time.sleep((attempt + 1) * 1.2)
                     continue
-                response.raise_for_status()
-
-            if response is None or response.status_code != 200:
-                raise requests.RequestException("dblp API unavailable")
-
-            # Parse XML response
-            root = ET.fromstring(response.content)
+                break
+            root = xml_root(response, "dblp", 'result')
 
             # dblp XML structure: result > hits > hit > info
             hits = root.findall('.//hit')
@@ -110,100 +102,100 @@ class DBLPSearcher(PaperSource):
                 return papers
 
             logger.warning("dblp API returned no parseable results, attempting HTML fallback")
-            return self._search_html_fallback(query=query, max_results=max_results)
+            try:
+                return self._search_html_fallback(query=query, max_results=max_results)
+            except Exception as exc:
+                # The API answered, so its empty result stands.
+                logger.error("dblp HTML fallback failed: %s", exc)
+                return []
 
-        except requests.RequestException as e:
-            logger.error(f"dblp API request error: {e}")
-            if hasattr(e, 'response') and e.response is not None:
-                logger.error(f"Response status: {e.response.status_code}")
-            return self._search_html_fallback(query=query, max_results=max_results)
-        except ET.ParseError as e:
-            logger.error(f"Failed to parse dblp XML response: {e}")
-            return self._search_html_fallback(query=query, max_results=max_results)
-        except Exception as e:
-            logger.error(f"Unexpected error in dblp search: {e}")
-            return self._search_html_fallback(query=query, max_results=max_results)
-
-        return papers
+        except Exception as api_error:
+            logger.error(f"dblp API failed, attempting HTML fallback: {api_error}")
+            try:
+                papers = self._search_html_fallback(query=query, max_results=max_results)
+            except Exception as exc:
+                logger.error("dblp HTML fallback failed: %s", exc)
+                papers = []
+            if papers:
+                return papers
+            # Nothing from either route: report the API failure, not "no results".
+            raise api_error
 
     def _search_html_fallback(self, query: str, max_results: int) -> List[Paper]:
         """Fallback search via dblp HTML endpoint when API is unavailable."""
         papers: List[Paper] = []
-        try:
-            response = self.session.get(
-                self.HTML_SEARCH_URL,
-                params={'q': query},
-                timeout=30,
-            )
-            response.raise_for_status()
-            soup = BeautifulSoup(response.text, 'html.parser')
-            entries = soup.select('.publ-list .entry')
-            for entry in entries:
-                try:
-                    title_elem = entry.select_one('.title')
-                    if not title_elem:
-                        continue
-                    title = title_elem.get_text(' ', strip=True)
-                    if not title:
-                        continue
-
-                    doi = ''
-                    paper_url = ''
-                    details_link = entry.select_one('li.details a[href]')
-                    ee_link = entry.select_one('li.ee a[href]')
-                    if details_link and details_link.get('href'):
-                        paper_url = details_link['href']
-                    if ee_link and ee_link.get('href'):
-                        ee_href = ee_link['href']
-                        extracted = extract_doi(ee_href)
-                        if extracted:
-                            doi = extracted
-                        if not paper_url:
-                            paper_url = ee_href
-
-                    year_str = ''
-                    year_elem = entry.select_one('.year')
-                    if year_elem:
-                        year_str = year_elem.get_text(strip=True)
-                    published_date = None
-                    if year_str.isdigit():
-                        published_date = datetime(int(year_str), 1, 1)
-
-                    authors: List[str] = []
-                    for node in entry.select('[itemprop="author"] [itemprop="name"], [itemprop="author"]'):
-                        text = node.get_text(' ', strip=True)
-                        if text and text not in authors and len(text) < 120:
-                            authors.append(text)
-
-                    entry_id = entry.get('id') or f"dblp_{hash(title) & 0xffffffff:08x}"
-
-                    papers.append(Paper(
-                        paper_id=entry_id,
-                        title=title,
-                        authors=authors,
-                        abstract='',
-                        doi=doi,
-                        published_date=published_date,
-                        pdf_url='',
-                        url=paper_url or f"https://dblp.org/search/publ?q={query}",
-                        source='dblp',
-                        extra={
-                            'venue': '',
-                            'year': year_str,
-                            'pages': '',
-                            'volume': '',
-                            'type': '',
-                            'key': entry_id,
-                            'fallback': 'html',
-                        }
-                    ))
-                    if len(papers) >= max_results:
-                        break
-                except Exception as exc:
-                    logger.warning("Error parsing dblp HTML entry: %s", exc)
+        response = self.session.get(
+            self.HTML_SEARCH_URL,
+            params={'q': query},
+            timeout=30,
+        )
+        check_response(response, "dblp")
+        soup = BeautifulSoup(response.text, 'html.parser')
+        entries = soup.select('.publ-list .entry')
+        for entry in entries:
+            try:
+                title_elem = entry.select_one('.title')
+                if not title_elem:
                     continue
-        except Exception as exc:
-            logger.error("dblp HTML fallback failed: %s", exc)
+                title = title_elem.get_text(' ', strip=True)
+                if not title:
+                    continue
+
+                doi = ''
+                paper_url = ''
+                details_link = entry.select_one('li.details a[href]')
+                ee_link = entry.select_one('li.ee a[href]')
+                if details_link and details_link.get('href'):
+                    paper_url = details_link['href']
+                if ee_link and ee_link.get('href'):
+                    ee_href = ee_link['href']
+                    extracted = extract_doi(ee_href)
+                    if extracted:
+                        doi = extracted
+                    if not paper_url:
+                        paper_url = ee_href
+
+                year_str = ''
+                year_elem = entry.select_one('.year')
+                if year_elem:
+                    year_str = year_elem.get_text(strip=True)
+                published_date = None
+                if year_str.isdigit():
+                    published_date = datetime(int(year_str), 1, 1)
+
+                authors: List[str] = []
+                for node in entry.select('[itemprop="author"] [itemprop="name"], [itemprop="author"]'):
+                    text = node.get_text(' ', strip=True)
+                    if text and text not in authors and len(text) < 120:
+                        authors.append(text)
+
+                entry_id = entry.get('id') or f"dblp_{hash(title) & 0xffffffff:08x}"
+
+                papers.append(Paper(
+                    paper_id=entry_id,
+                    title=title,
+                    authors=authors,
+                    abstract='',
+                    doi=doi,
+                    published_date=published_date,
+                    pdf_url='',
+                    url=paper_url or f"https://dblp.org/search/publ?q={query}",
+                    source='dblp',
+                    extra={
+                        'venue': '',
+                        'year': year_str,
+                        'pages': '',
+                        'volume': '',
+                        'type': '',
+                        'key': entry_id,
+                        'fallback': 'html',
+                    }
+                ))
+                if len(papers) >= max_results:
+                    break
+            except Exception as exc:
+                logger.warning("Error parsing dblp HTML entry: %s", exc)
+                continue
 
         return papers
 

@@ -15,7 +15,7 @@ from pypdf import PdfReader
 
 from ..paper import Paper
 from ..utils import extract_doi
-from .base import PaperSource
+from .base import PaperSource, check_response, retry_hint
 
 
 logger = logging.getLogger(__name__)
@@ -121,6 +121,7 @@ class ArxivSearcher(PaperSource):
     def _request_with_retries(self, params):
         """Issue one serialized, paced arXiv request sequence."""
         response = None
+        network_error = None
         saw_unusable_406 = False
         with self._request_lock:
             for attempt in range(self.MAX_ATTEMPTS):
@@ -131,8 +132,9 @@ class ArxivSearcher(PaperSource):
                         params=params,
                         timeout=30,
                     )
-                except requests.RequestException:
+                except requests.RequestException as e:
                     response = None
+                    network_error = e
                     if attempt < self.MAX_ATTEMPTS - 1:
                         time.sleep((attempt + 1) * 1.5)
                     continue
@@ -163,7 +165,7 @@ class ArxivSearcher(PaperSource):
                     if response.status_code == 429:
                         raise requests.RequestException(
                             "arxiv rate-limited: HTTP 429 persisted "
-                            f"across {self.MAX_ATTEMPTS} attempts"
+                            f"across {self.MAX_ATTEMPTS} attempts{retry_hint(response)}"
                         )
                 break
         if saw_unusable_406:
@@ -171,6 +173,8 @@ class ArxivSearcher(PaperSource):
                 "arxiv search failed: HTTP 406 without a usable arXiv Atom feed; "
                 f"no successful response within {self.MAX_ATTEMPTS} attempts"
             )
+        if response is None:
+            raise network_error
         return response
 
     @staticmethod
@@ -196,8 +200,16 @@ class ArxivSearcher(PaperSource):
         }
         response = self._request_with_retries(params)
 
-        if response is None or response.status_code not in (200, 406):
-            return []
+        if response.status_code != 406:  # a 406 here already carries a usable feed
+            check_response(response, "arXiv")
+            # feedparser accepts almost anything, so an error page would
+            # otherwise read as zero results.
+            try:
+                root = ElementTree.fromstring(response.content)
+            except ElementTree.ParseError:
+                root = None
+            if root is None or root.tag != "{http://www.w3.org/2005/Atom}feed":
+                raise ValueError("arXiv returned a reply that is not an Atom feed")
 
         feed = feedparser.parse(response.content)
         papers = []

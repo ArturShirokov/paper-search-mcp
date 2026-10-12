@@ -3,7 +3,7 @@ from datetime import datetime
 import requests
 import logging
 from ..paper import Paper
-from .base import PaperSource
+from .base import PaperSource, check_response, json_body, retry_hint
 from ..utils import extract_doi
 from ..config import get_env
 
@@ -182,37 +182,30 @@ class OpenAlexSearcher(PaperSource):
 
         Returns:
             List[Paper]: List of found papers with metadata.
+
+        Raises:
+            requests.RequestException: the request failed or got a non-2xx reply.
+            ValueError: the reply was not JSON.
         """
+        params = {
+            "search": query,
+            "per_page": min(max_results, 100),
+        }
+        filter_value = (filter or "").strip()
+        if filter_value:
+            params["filter"] = filter_value
+
+        response = self.session.get(self.BASE_URL, params=params, timeout=30)
+        check_response(response, "OpenAlex")
+        data = json_body(response, "OpenAlex")
+
         papers = []
-
-        try:
-            params = {
-                "search": query,
-                "per_page": min(max_results, 100),
-            }
-            filter_value = (filter or "").strip()
-            if filter_value:
-                params["filter"] = filter_value
-
-            response = self.session.get(self.BASE_URL, params=params, timeout=30)
-            
-            if response.status_code != 200:
-                logger.error(f"OpenAlex search failed with status {response.status_code}")
-                return papers
-
-            data = response.json()
-            results = data.get("results", [])
-
-            for item in results:
-                if len(papers) >= max_results:
-                    break
-
-                paper = self._parse_work(item)
-                if paper is not None:
-                    papers.append(paper)
-
-        except Exception as e:
-            logger.error(f"OpenAlex search error: {e}")
+        for item in data.get("results") or []:
+            if len(papers) >= max_results:
+                break
+            paper = self._parse_work(item)
+            if paper is not None:
+                papers.append(paper)
 
         return papers
 
@@ -291,7 +284,9 @@ class OpenAlexSearcher(PaperSource):
             except requests.RequestException:
                 raise RuntimeError("OpenAlex SSRN request failed (network or timeout)") from None
             if response.status_code != 200:
-                raise RuntimeError(f"OpenAlex SSRN search returned HTTP {response.status_code}")
+                raise RuntimeError(
+                    f"OpenAlex SSRN search returned HTTP {response.status_code}{retry_hint(response)}"
+                )
             try:
                 data = response.json()
             except (ValueError, TypeError):

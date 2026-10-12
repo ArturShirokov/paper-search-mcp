@@ -24,7 +24,7 @@ RECORD = {
 
 
 def _response(json_data=None, content=b""):
-    response = MagicMock()
+    response = MagicMock(status_code=200, headers={})
     response.json.return_value = json_data
     response.content = content
     response.raise_for_status.return_value = None
@@ -86,7 +86,7 @@ def test_missing_pdf_and_http_errors(searcher):
     assert paper.pdf_url == ""
 
     failing = _response()
-    failing.raise_for_status.side_effect = requests.HTTPError("422")
+    failing.status_code = 500
     searcher.session.get = MagicMock(return_value=failing)
     with pytest.raises(requests.HTTPError):
         searcher.search("x")
@@ -176,3 +176,22 @@ def test_author_list_entries_are_never_split(searcher):
 
     paper = searcher._parse(dict(RECORD, authors=["Dong Zhang, Rong-Bing Zhao, Chu-Yuan Zhang et al."]))
     assert paper.authors == ["Dong Zhang", "Rong-Bing Zhao", "Chu-Yuan Zhang"]
+
+
+def test_download_without_pdf_says_so(searcher):
+    missing = _response({"detail": "PDF not available for paper: chinaxiv-202609.00181", "status": 404})
+    missing.status_code = 404
+    searcher.session.get = MagicMock(return_value=missing)
+
+    with pytest.raises(ValueError, match="PDF not available for paper: chinaxiv-202609.00181"):
+        searcher.download_pdf("chinaxiv-202609.00181")
+
+
+def test_rate_limit_reports_retry_after(searcher):
+    limited = _response()
+    limited.status_code = 429
+    limited.headers = {"Retry-After": "60"}
+    searcher.session.get = MagicMock(return_value=limited)
+
+    with pytest.raises(requests.HTTPError, match="Retry-After: 60"):
+        searcher.search("x")

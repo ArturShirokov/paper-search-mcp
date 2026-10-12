@@ -408,3 +408,21 @@ def test_captcha_returned_after_deadline_still_starts_cooldown(searcher):
     with pytest.raises(GoogleScholarSearchError, match="cooling down"):
         searcher.search("second")
     assert searcher.session.get.call_count == 1
+
+
+@pytest.mark.parametrize("text", [
+    "<html><body>Something changed</body></html>",
+    "<html><body>Server Error</body></html>",
+])
+def test_first_page_without_results_or_no_hit_marker_raises(searcher, text):
+    searcher.session.get.return_value = response(text=text)
+    with pytest.raises(GoogleScholarSearchError, match="neither results nor a no-results notice"):
+        searcher.search("test")
+
+
+def test_unexpected_parse_error_is_not_silent_empty(searcher, monkeypatch):
+    def boom(*args, **kwargs):
+        raise RuntimeError("parser exploded")
+    monkeypatch.setattr(google_scholar, "BeautifulSoup", boom)
+    with pytest.raises(RuntimeError, match="parser exploded"):
+        searcher.search("test")

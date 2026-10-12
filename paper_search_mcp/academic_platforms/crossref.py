@@ -4,7 +4,7 @@ from datetime import datetime
 import requests
 import time
 from ..paper import Paper
-from .base import PaperSource
+from .base import PaperSource, check_response, json_body
 import logging
 
 logger = logging.getLogger(__name__)
@@ -48,59 +48,56 @@ class CrossRefSearcher(PaperSource):
             
         Returns:
             List of Paper objects
+
+        Raises:
+            requests.RequestException: On network failure or a non-2xx reply.
+            ValueError: If the reply is not JSON or has no 'message' object.
         """
-        try:
-            params = {
-                'query': query,
-                'rows': min(max_results, 1000),  # CrossRef API max is 1000
-                'sort': 'relevance',
-                'order': 'desc'
-            }
-            
-            # Add any additional filters from kwargs
-            if 'filter' in kwargs:
-                params['filter'] = kwargs['filter']
-            if 'sort' in kwargs:
-                params['sort'] = kwargs['sort']
-            if 'order' in kwargs:
-                params['order'] = kwargs['order']
-                
-            # Add polite pool parameter
-            params['mailto'] = 'paper-search@example.org'
-            
-            url = f"{self.BASE_URL}/works"
+        params = {
+            'query': query,
+            'rows': min(max_results, 1000),  # CrossRef API max is 1000
+            'sort': 'relevance',
+            'order': 'desc'
+        }
+
+        # Add any additional filters from kwargs
+        if 'filter' in kwargs:
+            params['filter'] = kwargs['filter']
+        if 'sort' in kwargs:
+            params['sort'] = kwargs['sort']
+        if 'order' in kwargs:
+            params['order'] = kwargs['order']
+
+        # Add polite pool parameter
+        params['mailto'] = 'paper-search@example.org'
+
+        url = f"{self.BASE_URL}/works"
+        response = self.session.get(url, params=params, timeout=30)
+
+        if response.status_code == 429:
+            # Rate limited - wait and retry once
+            logger.warning("Rate limited by CrossRef API, waiting 2 seconds...")
+            time.sleep(2)
             response = self.session.get(url, params=params, timeout=30)
-            
-            if response.status_code == 429:
-                # Rate limited - wait and retry once
-                logger.warning("Rate limited by CrossRef API, waiting 2 seconds...")
-                time.sleep(2)
-                response = self.session.get(url, params=params, timeout=30)
-            
-            response.raise_for_status()
-            data = response.json()
-            
-            papers = []
-            items = data.get('message', {}).get('items', [])
-            
-            for item in items:
-                try:
-                    paper = self._parse_crossref_item(item)
-                    if paper:
-                        papers.append(paper)
-                except Exception as e:
-                    logger.warning(f"Error parsing CrossRef item: {e}")
-                    continue
-                    
-            return papers
-            
-        except requests.RequestException as e:
-            logger.error(f"Error searching CrossRef: {e}")
-            return []
-        except Exception as e:
-            logger.error(f"Unexpected error in CrossRef search: {e}")
-            return []
-    
+
+        check_response(response, "CrossRef")
+        data = json_body(response, "CrossRef")
+        message = data.get('message') if isinstance(data, dict) else None
+        if not isinstance(message, dict):
+            raise ValueError("CrossRef returned an unexpected reply (no 'message' object)")
+
+        papers = []
+        for item in message.get('items', []):
+            try:
+                paper = self._parse_crossref_item(item)
+                if paper:
+                    papers.append(paper)
+            except Exception as e:
+                logger.warning(f"Error parsing CrossRef item: {e}")
+                continue
+
+        return papers
+
     def _parse_crossref_item(self, item: Dict[str, Any]) -> Optional[Paper]:
         """Parse a CrossRef API item into a Paper object.
 

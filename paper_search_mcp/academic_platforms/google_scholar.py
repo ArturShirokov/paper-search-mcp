@@ -350,6 +350,13 @@ class GoogleScholarSearcher(PaperSource):
                 results = soup.find_all('div', class_='gs_ri')
 
                 if not results:
+                    # Scholar's no-hit page says "did not match any articles";
+                    # a first page with neither is a changed or error page.
+                    if start == 0 and "did not match any articles" not in page_text:
+                        raise GoogleScholarSearchError(
+                            "Google Scholar returned a page with neither results nor a "
+                            "no-results notice. " + self.FALLBACK_HINT
+                        )
                     break
 
                 # Process each result
@@ -373,9 +380,6 @@ class GoogleScholarSearcher(PaperSource):
                 raise GoogleScholarSearchError(
                     "Google Scholar request failed; check connectivity or use another source."
                 ) from e
-            except Exception as e:
-                logger.error(f"Search error: {e}")
-                break
 
         return papers[:max_results]
 

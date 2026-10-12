@@ -1,5 +1,8 @@
 import unittest
 import requests
+from unittest.mock import Mock
+
+import pytest
 
 from paper_search_mcp.academic_platforms.hal import HALSearcher
 
@@ -67,6 +70,52 @@ class TestHALSearcher(unittest.TestCase):
     def test_parse_doc_invalid(self):
         paper = self.searcher._parse_doc({})
         self.assertIsNone(paper)
+
+
+def reply(status=200, json_data=None, content=b"", headers=None):
+    response = Mock(status_code=status, content=content, text=content.decode(), url="https://example.org/api")
+    response.headers = headers or {}
+    if json_data is None:
+        response.json.side_effect = requests.JSONDecodeError("Expecting value", "", 0)
+    else:
+        response.json.return_value = json_data
+    return response
+
+
+# --- errors must raise, not look like zero results (#5) ---------------------
+
+def test_search_429_raises_with_retry_after():
+    searcher = HALSearcher()
+    searcher.session.get = Mock(return_value=reply(429, headers={"Retry-After": "60"}))
+    with pytest.raises(requests.HTTPError, match="Retry-After: 60"):
+        searcher.search("graphs")
+
+
+def test_search_network_error_raises():
+    searcher = HALSearcher()
+    searcher.session.get = Mock(side_effect=requests.ConnectionError("down"))
+    with pytest.raises(requests.ConnectionError):
+        searcher.search("graphs")
+
+
+def test_search_non_json_raises():
+    searcher = HALSearcher()
+    searcher.session.get = Mock(return_value=reply(content=b"<html>", headers={"Content-Type": "text/html"}))
+    with pytest.raises(ValueError, match="non-JSON.*text/html"):
+        searcher.search("graphs")
+
+
+def test_search_genuine_empty_is_empty():
+    searcher = HALSearcher()
+    searcher.session.get = Mock(return_value=reply(json_data={"response": {"numFound": 0, "docs": []}}))
+    assert searcher.search("graphs") == []
+
+
+def test_search_wrong_shape_raises():
+    searcher = HALSearcher()
+    searcher.session.get = Mock(return_value=reply(json_data={"error": {"msg": "undefined field"}}))
+    with pytest.raises(ValueError, match="HAL"):
+        searcher.search("graphs")
 
 
 if __name__ == "__main__":

@@ -3,6 +3,8 @@ import unittest
 import os
 import requests
 import urllib3
+import xml.etree.ElementTree as ET
+from unittest.mock import Mock, patch
 from paper_search_mcp.academic_platforms.openaire import OpenAiresearcher
 
 
@@ -30,6 +32,61 @@ def check_api_accessible():
             return False
     except Exception:
         return False
+
+
+def _reply(status=200, content=b"", json_data=None, headers=None):
+    response = Mock(status_code=status, content=content)
+    response.headers = headers or {}
+    if json_data is None:
+        response.json.side_effect = requests.JSONDecodeError("Expecting value", "", 0)
+    else:
+        response.json.return_value = json_data
+    return response
+
+
+EMPTY_V2 = b"<response><results></results></response>"
+EMPTY_LEGACY = {"response": {"results": {"result": []}}}
+
+
+@patch("paper_search_mcp.academic_platforms.openaire.time.sleep")
+class TestOpenAireSearchErrors(unittest.TestCase):
+    """Failed requests must raise, not look like zero results (#5)."""
+
+    def run_search(self, v2, legacy):
+        searcher = OpenAiresearcher(api_key="")
+
+        def get(url, **kwargs):
+            reply = v2 if "researchProducts" in url else legacy
+            if isinstance(reply, Exception):
+                raise reply
+            return reply
+
+        searcher.session.get = Mock(side_effect=get)
+        with patch("paper_search_mcp.academic_platforms.openaire.requests.get", side_effect=get):
+            return searcher.search("graphs")
+
+    def test_rate_limit_everywhere_raises_with_retry_after(self, _sleep):
+        limited = _reply(429, headers={"Retry-After": "60"})
+        with self.assertRaisesRegex(requests.HTTPError, r"OpenAIRE returned HTTP 429 \(Retry-After: 60\)"):
+            self.run_search(limited, limited)
+
+    def test_v2_failure_reported_when_legacy_also_fails(self, _sleep):
+        with self.assertRaises(requests.Timeout):
+            self.run_search(requests.Timeout("slow"), _reply(404))
+
+    def test_v2_failure_reported_when_legacy_is_empty(self, _sleep):
+        with self.assertRaisesRegex(requests.HTTPError, "OpenAIRE returned HTTP 503"):
+            self.run_search(_reply(503), _reply(json_data=EMPTY_LEGACY))
+
+    def test_bad_v2_body_raises_when_legacy_not_json(self, _sleep):
+        with self.assertRaises(ET.ParseError):
+            self.run_search(_reply(content=b"<html"), _reply(content=b"<html>"))
+
+    def test_genuine_empty_result_is_empty(self, _sleep):
+        self.assertEqual(self.run_search(_reply(content=EMPTY_V2), _reply(json_data=EMPTY_LEGACY)), [])
+
+    def test_empty_v2_answer_stands_when_legacy_fails(self, _sleep):
+        self.assertEqual(self.run_search(_reply(content=EMPTY_V2), _reply(500)), [])
 
 
 class TestOpenAiresearcher(unittest.TestCase):

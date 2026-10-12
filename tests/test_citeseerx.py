@@ -1,5 +1,6 @@
 import unittest
 import requests
+import pytest
 from unittest.mock import Mock, patch
 
 from paper_search_mcp.academic_platforms.citeseerx import CiteSeerXSearcher
@@ -68,18 +69,53 @@ class TestCiteSeerXSearcher(unittest.TestCase):
         paper = self.searcher._parse_citeseerx_result({"info": {}})
         self.assertIsNone(paper)
 
-    def test_archive_redirect_returns_empty_search(self):
-        """_get should raise HTTPError when the API redirects to web.archive.org."""
-        archive_response = Mock()
+    def test_archive_redirect_raises(self):
+        """An API redirected to web.archive.org is an outage, not zero results."""
+        archive_response = Mock(status_code=200, headers={})
         archive_response.url = "https://web.archive.org/web/20251230112235/https://citeseerx.ist.psu.edu/api/search"
-        archive_response.raise_for_status.return_value = None
 
         with patch.object(self.searcher.session, "get", return_value=archive_response):
-            papers = self.searcher.search("machine learning", max_results=3)
+            with self.assertRaisesRegex(requests.HTTPError, "web archive"):
+                self.searcher.search("machine learning", max_results=3)
 
-        # Should return empty list rather than crashing
-        self.assertIsInstance(papers, list)
-        self.assertEqual(papers, [])
+
+def reply(status=200, json_data=None, content=b"", headers=None):
+    response = Mock(status_code=status, content=content, text=content.decode(), url="https://example.org/api")
+    response.headers = headers or {}
+    if json_data is None:
+        response.json.side_effect = requests.JSONDecodeError("Expecting value", "", 0)
+    else:
+        response.json.return_value = json_data
+    return response
+
+
+# --- errors must raise, not look like zero results (#5) ---------------------
+
+def test_search_429_raises_with_retry_after():
+    searcher = CiteSeerXSearcher()
+    searcher.session.get = Mock(return_value=reply(429, headers={"Retry-After": "60"}))
+    with pytest.raises(requests.HTTPError, match="Retry-After: 60"):
+        searcher.search("graphs")
+
+
+def test_search_network_error_raises():
+    searcher = CiteSeerXSearcher()
+    searcher.session.get = Mock(side_effect=requests.ConnectionError("down"))
+    with pytest.raises(requests.ConnectionError):
+        searcher.search("graphs")
+
+
+def test_search_non_json_raises():
+    searcher = CiteSeerXSearcher()
+    searcher.session.get = Mock(return_value=reply(content=b"<html>", headers={"Content-Type": "text/html"}))
+    with pytest.raises(ValueError, match="non-JSON.*text/html"):
+        searcher.search("graphs")
+
+
+def test_search_genuine_empty_is_empty():
+    searcher = CiteSeerXSearcher()
+    searcher.session.get = Mock(return_value=reply(json_data={"result": {"hits": {"hit": []}}}))
+    assert searcher.search("graphs") == []
 
 
 if __name__ == "__main__":

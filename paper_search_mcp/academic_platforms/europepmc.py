@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from ..paper import Paper
 from ..utils import extract_doi
-from .base import PaperSource
+from .base import PaperSource, check_response, json_body
 from pypdf import PdfReader
 
 logger = logging.getLogger(__name__)
@@ -39,56 +39,56 @@ class EuropePMCSearcher(PaperSource):
 
         Returns:
             List[Paper]: List of found papers with metadata
+
+        Raises:
+            requests.RequestException: On network failure or a non-2xx reply.
+            ValueError: If the reply is not JSON or has no 'resultList'.
         """
         papers = []
 
-        try:
-            # Prepare search parameters
-            params = {
-                'query': query,
-                'pageSize': min(max_results, 100),  # Use pageSize parameter
-                'format': 'json',
-                'resultType': 'core',
-            }
+        # Prepare search parameters
+        params = {
+            'query': query,
+            'pageSize': min(max_results, 100),  # Use pageSize parameter
+            'format': 'json',
+            'resultType': 'core',
+        }
 
-            # Add optional filters
-            if 'year' in kwargs:
-                params['year'] = kwargs['year']
-            if 'has_fulltext' in kwargs:
-                params['has_fulltext'] = 'y' if kwargs['has_fulltext'] else 'n'
-            if 'open_access' in kwargs:
-                params['open_access'] = 'y' if kwargs['open_access'] else 'n'
-            if 'source' in kwargs:
-                params['source'] = kwargs['source']
+        # Add optional filters
+        if 'year' in kwargs:
+            params['year'] = kwargs['year']
+        if 'has_fulltext' in kwargs:
+            params['has_fulltext'] = 'y' if kwargs['has_fulltext'] else 'n'
+        if 'open_access' in kwargs:
+            params['open_access'] = 'y' if kwargs['open_access'] else 'n'
+        if 'source' in kwargs:
+            params['source'] = kwargs['source']
 
-            # Europe PMC supports sorting
-            if 'sort' in kwargs:
-                params['sort'] = kwargs['sort']
+        # Europe PMC supports sorting
+        if 'sort' in kwargs:
+            params['sort'] = kwargs['sort']
 
-            # Make API request
-            response = self.session.get(f"{self.BASE_URL}/search", params=params, timeout=30)
-            response.raise_for_status()
-            data = response.json()
+        # Make API request
+        response = self.session.get(f"{self.BASE_URL}/search", params=params, timeout=30)
+        check_response(response, "Europe PMC")
+        data = json_body(response, "Europe PMC")
+        if not isinstance(data, dict) or not isinstance(data.get('resultList'), dict):
+            raise ValueError("Europe PMC returned an unexpected reply (no 'resultList')")
 
-            # Parse results
-            result_list = data.get('resultList', {}).get('result', [])
-            for item in result_list:
-                try:
-                    paper = self._parse_item(item)
-                    if paper:
-                        papers.append(paper)
-                        if len(papers) >= max_results:
-                            break
-                except Exception as e:
-                    logger.warning(f"Error parsing Europe PMC item: {e}")
-                    continue
+        # Parse results
+        result_list = data['resultList'].get('result', [])
+        for item in result_list:
+            try:
+                paper = self._parse_item(item)
+                if paper:
+                    papers.append(paper)
+                    if len(papers) >= max_results:
+                        break
+            except Exception as e:
+                logger.warning(f"Error parsing Europe PMC item: {e}")
+                continue
 
-            logger.info(f"Europe PMC search returned {len(papers)} papers for query: {query}")
-
-        except requests.RequestException as e:
-            logger.error(f"Europe PMC search request error: {e}")
-        except Exception as e:
-            logger.error(f"Unexpected error in Europe PMC search: {e}")
+        logger.info(f"Europe PMC search returned {len(papers)} papers for query: {query}")
 
         return papers
 

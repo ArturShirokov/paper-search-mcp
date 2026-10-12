@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional
 import requests
 
 from ..paper import Paper
-from .base import PaperSource
+from .base import PaperSource, check_response, json_body
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +75,10 @@ class HALSearcher(PaperSource):
 
         Returns:
             List of :class:`~paper_search_mcp.paper.Paper` objects.
+
+        Raises:
+            requests.RequestException: The request failed or HAL returned a non-2xx status.
+            ValueError: HAL returned a reply that is not a search result.
         """
         max_results = max(1, min(max_results, 10000))
 
@@ -102,16 +106,14 @@ class HALSearcher(PaperSource):
         if fq_parts:
             params["fq"] = " AND ".join(fq_parts)
 
-        try:
-            response = self.session.get(self.SEARCH_URL, params=params, timeout=20)
-            response.raise_for_status()
-            data = response.json()
-        except Exception as exc:
-            logger.error("HAL search failed: %s", exc)
-            return []
+        response = self.session.get(self.SEARCH_URL, params=params, timeout=20)
+        check_response(response, "HAL")
+        data = json_body(response, "HAL")
+        if not isinstance(data, dict) or not isinstance(data.get("response"), dict):
+            raise ValueError("HAL returned an unexpected reply (no 'response' object)")
 
         papers: List[Paper] = []
-        for doc in data.get("response", {}).get("docs", []):
+        for doc in data["response"].get("docs", []):
             paper = self._parse_doc(doc)
             if paper:
                 papers.append(paper)
