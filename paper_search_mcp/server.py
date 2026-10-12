@@ -806,7 +806,8 @@ async def search_biorxiv(query: str, max_results: int = 10) -> List[Dict]:
 
     Note: bioRxiv does not provide full-text keyword search. The query may be a DOI,
     a date range such as '2024-01-01/2024-01-31', a category such as
-    'bioinformatics', or an empty string for recent papers.
+    'bioinformatics', or an empty string for recent papers. Any other text is
+    rejected with the list of categories.
 
     Args:
         query: DOI, date range, category name, or an empty string for recent papers.
@@ -822,12 +823,13 @@ async def search_biorxiv(query: str, max_results: int = 10) -> List[Dict]:
 async def search_medrxiv(query: str, max_results: int = 10) -> List[Dict]:
     """Search academic papers from medRxiv.
 
-    Note: medRxiv API filters by category name within the last 30 days, not full-text
-    keyword search. Use a category keyword such as 'infectious_diseases',
-    'cardiovascular_medicine', 'oncology', etc.
+    Note: medRxiv does not provide full-text keyword search. The query may be a DOI,
+    a date range such as '2024-01-01/2024-01-31', a category such as
+    'infectious diseases' or 'oncology' (last 30 days), or an empty string for
+    recent papers. Any other text is rejected with the list of categories.
 
     Args:
-        query: Category name to filter by (e.g., 'infectious_diseases', 'oncology').
+        query: DOI, date range, category name, or an empty string for recent papers.
         max_results: Maximum number of papers to return (default: 10).
     Returns:
         List of paper metadata in dictionary format.

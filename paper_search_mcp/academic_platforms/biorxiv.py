@@ -15,9 +15,24 @@ logger = logging.getLogger(__name__)
 
 
 class BioRxivSearcher(PaperSource):
-    """Searcher for bioRxiv papers"""
+    """Searcher for bioRxiv papers; MedRxivSearcher reuses it for medRxiv."""
 
+    SERVER = "biorxiv"
+    LABEL = "bioRxiv"
     BASE_URL = "https://api.biorxiv.org/details/biorxiv"
+    SITE_URL = "https://www.biorxiv.org"
+    # The API has no keyword search, so a query that isn't a DOI or date range
+    # must be one of these; anything else would silently return every paper.
+    CATEGORIES = frozenset({
+        "animal behavior and cognition", "biochemistry", "bioengineering",
+        "bioinformatics", "biophysics", "cancer biology", "cell biology",
+        "clinical trials", "developmental biology", "ecology", "epidemiology",
+        "evolutionary biology", "genetics", "genomics", "immunology",
+        "microbiology", "molecular biology", "neuroscience", "paleontology",
+        "pathology", "pharmacology and toxicology", "physiology",
+        "plant biology", "scientific communication and education",
+        "synthetic biology", "systems biology", "zoology",
+    })
     DATE_RANGE_PATTERN = re.compile(
         r"^\s*(\d{4}-\d{2}-\d{2})\s*(?:/|:|\.\.|to)\s*(\d{4}-\d{2}-\d{2})\s*$",
         re.IGNORECASE,
@@ -31,7 +46,7 @@ class BioRxivSearcher(PaperSource):
 
     @staticmethod
     def _normalize_category(category: str) -> str:
-        return re.sub(r"[\s-]+", "_", category.strip().lower())
+        return re.sub(r"[\s/-]+", "_", category.strip().lower())
 
     def _resolve_query_mode(
         self, query: str, days: int
@@ -48,7 +63,7 @@ class BioRxivSearcher(PaperSource):
             parsed_start = date.fromisoformat(start_date)
             parsed_end = date.fromisoformat(end_date)
             if parsed_start > parsed_end:
-                raise ValueError("bioRxiv date range start must not be after its end")
+                raise ValueError(f"{self.LABEL} date range start must not be after its end")
             return "interval", start_date, end_date, None
 
         if days < 1:
@@ -57,31 +72,37 @@ class BioRxivSearcher(PaperSource):
         today = date.today()
         end_date = today.isoformat()
         start_date = (today - timedelta(days=days)).isoformat()
-        category = (
-            self._normalize_category(normalized_query) if normalized_query else None
-        )
+        if not normalized_query:
+            return "interval", start_date, end_date, None
+        category = self._normalize_category(normalized_query)
+        if category.replace("_", " ") not in self.CATEGORIES:
+            raise ValueError(
+                f"{normalized_query!r} is not a {self.LABEL} category, DOI or "
+                f"date range ({self.LABEL} has no keyword search). Categories: "
+                + ", ".join(sorted(self.CATEGORIES))
+            )
         return "interval", start_date, end_date, category
 
     def _request_json(self, url: str) -> dict:
         for attempt in range(1, self.max_retries + 1):
             try:
                 response = self.session.get(url, timeout=self.timeout)
-                check_response(response, "bioRxiv")
-                data = json_body(response, "bioRxiv")
+                check_response(response, self.LABEL)
+                data = json_body(response, self.LABEL)
                 if not isinstance(data, dict):
-                    raise ValueError("bioRxiv returned an unexpected JSON reply")
+                    raise ValueError(f"{self.LABEL} returned an unexpected JSON reply")
                 return data
             except (requests.exceptions.RequestException, ValueError) as exc:
                 if attempt == self.max_retries:
                     raise
                 logger.info(
-                    "bioRxiv request attempt %d failed; retrying: %s",
+                    "%s request attempt %d failed; retrying: %s",
+                    self.LABEL,
                     attempt,
                     exc,
                 )
 
-    @staticmethod
-    def _parse_papers(collection: list) -> list[Paper]:
+    def _parse_papers(self, collection: list) -> list[Paper]:
         papers = []
         for item in collection:
             try:
@@ -108,20 +129,18 @@ class BioRxivSearcher(PaperSource):
                         title=title,
                         authors=authors,
                         abstract=str(item.get("abstract") or ""),
-                        url=f"https://www.biorxiv.org/content/{doi}v{version}",
-                        pdf_url=(
-                            f"https://www.biorxiv.org/content/{doi}v{version}.full.pdf"
-                        ),
+                        url=f"{self.SITE_URL}/content/{doi}v{version}",
+                        pdf_url=f"{self.SITE_URL}/content/{doi}v{version}.full.pdf",
                         published_date=published_date,
                         updated_date=published_date,
-                        source="biorxiv",
+                        source=self.SERVER,
                         categories=[category] if category else [],
                         keywords=[],
                         doi=doi,
                     )
                 )
             except (KeyError, TypeError, ValueError) as exc:
-                logger.warning("Failed to parse bioRxiv entry: %s", exc)
+                logger.warning("Failed to parse %s entry: %s", self.LABEL, exc)
         return papers
 
     def search(self, query: str, max_results: int = 10, days: int = 30) -> list[Paper]:
@@ -155,7 +174,7 @@ class BioRxivSearcher(PaperSource):
 
     def download_pdf(self, paper_id: str, save_path: str) -> str:
         """
-        Download a PDF for a given paper ID from bioRxiv.
+        Download a PDF for a given paper ID.
 
         Args:
             paper_id: The DOI of the paper.
@@ -167,7 +186,7 @@ class BioRxivSearcher(PaperSource):
         if not paper_id:
             raise ValueError("Invalid paper_id: paper_id is empty")
 
-        pdf_url = f"https://www.biorxiv.org/content/{paper_id}v1.full.pdf"
+        pdf_url = f"{self.SITE_URL}/content/{paper_id}v1.full.pdf"
         tries = 0
         while tries < self.max_retries:
             try:
@@ -197,7 +216,7 @@ class BioRxivSearcher(PaperSource):
         Read a paper and convert it to text format.
 
         Args:
-            paper_id: bioRxiv DOI
+            paper_id: Paper DOI
             save_path: Directory where the PDF is/will be saved
 
         Returns:

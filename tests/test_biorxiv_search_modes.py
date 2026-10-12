@@ -128,3 +128,14 @@ def test_failure_on_later_page_raises_instead_of_partial_list(searcher):
 def test_genuine_empty_result_is_empty(searcher):
     searcher.session.get = Mock(return_value=_mock_response([]))
     assert searcher.search("bioinformatics") == []
+
+
+def test_unknown_category_raises_naming_valid_ones(searcher):
+    with pytest.raises(ValueError, match="not a bioRxiv category.*bioinformatics"):
+        searcher.search("historical document OCR")
+    searcher.session.get.assert_not_called()
+
+
+def test_known_category_matches_case_and_separators(searcher):
+    searcher.search("Pharmacology-and-Toxicology", max_results=1)
+    assert "?category=pharmacology_and_toxicology" in searcher.session.get.call_args.args[0]

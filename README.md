@@ -97,8 +97,8 @@ This matrix reflects **verified live-integration results** from functional and e
 |---|---|---|---|---|
 | arXiv | ✅ | ✅ | ✅ | Open API; reliable |
 | PubMed | ✅ | ❌ | ⚠️ info-only | Open API; reliable |
-| bioRxiv | ✅ | ✅ | ✅ | Open API; reliable |
-| medRxiv | ✅ | ✅ | ✅ | Open API; reliable |
+| bioRxiv | ✅ | ✅ | ✅ | Open API; no keyword search — query by category, DOI or date range |
+| medRxiv | ✅ | ✅ | ✅ | Open API; no keyword search — query by category, DOI or date range |
 | Google Scholar | ⚠️ | ❌ | ❌ | Upstream bot-detection/rate limits can prevent search; reported as source errors |
 | IACR | ✅ | ✅ | ✅ | Open API; reliable |
 | Semantic Scholar | ✅ | ✅ (OA) | ✅ (OA) | Works without key (rate-limited); key improves limits; key rejection (403) retried automatically without key |

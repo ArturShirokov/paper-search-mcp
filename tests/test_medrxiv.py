@@ -45,6 +45,44 @@ class TestMedRxivSearchErrors(unittest.TestCase):
         self.assertEqual(self.searcher.search("epidemiology"), [])
 
 
+class TestMedRxivQueryModes(unittest.TestCase):
+    """Free text must not be sent as a category (#7)."""
+
+    def setUp(self):
+        self.searcher = MedRxivSearcher()
+        ok = Mock(status_code=200, headers={})
+        ok.json.return_value = {"collection": [{
+            "doi": "10.1101/2024.01.01.24300001", "title": "T", "authors": "A; B",
+            "abstract": "", "date": "2024-01-01", "version": "2",
+            "category": "cardiovascular medicine",
+        }]}
+        self.searcher.session.get = Mock(return_value=ok)
+
+    def test_unknown_category_raises_naming_valid_ones(self):
+        with self.assertRaisesRegex(ValueError, "not a medRxiv category.*cardiovascular medicine"):
+            self.searcher.search("machine learning")
+        self.searcher.session.get.assert_not_called()
+
+    def test_known_category_filters_medrxiv(self):
+        papers = self.searcher.search("Cardiovascular Medicine", max_results=1)
+        url = self.searcher.session.get.call_args.args[0]
+        self.assertIn("/details/medrxiv/", url)
+        self.assertIn("?category=cardiovascular_medicine", url)
+        self.assertEqual(papers[0].source, "medrxiv")
+        self.assertEqual(papers[0].url, "https://www.medrxiv.org/content/10.1101/2024.01.01.24300001v2")
+
+    def test_doi_lookup(self):
+        self.searcher.search("10.1101/2024.01.01.24300001")
+        self.assertEqual(
+            self.searcher.session.get.call_args.args[0],
+            "https://api.biorxiv.org/details/medrxiv/10.1101/2024.01.01.24300001/na/json",
+        )
+
+    def test_slash_in_category_name(self):
+        self.searcher.search("HIV/AIDS", max_results=1)
+        self.assertIn("?category=hiv_aids", self.searcher.session.get.call_args.args[0])
+
+
 class TestMedRxivSearcher(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -59,8 +97,8 @@ class TestMedRxivSearcher(unittest.TestCase):
         if not self.api_accessible:
             self.skipTest("medRxiv API is not accessible")
         
-        papers = self.searcher.search("machine learning", max_results=10)
-        print(f"Found {len(papers)} papers for query 'machine learning':")
+        papers = self.searcher.search("health informatics", max_results=10)
+        print(f"Found {len(papers)} papers for query 'health informatics':")
         for i, paper in enumerate(papers, 1):
             print(f"{i}. {paper.title} (ID: {paper.paper_id})")
         self.assertTrue(len(papers) > 0)
@@ -70,7 +108,7 @@ class TestMedRxivSearcher(unittest.TestCase):
         if not self.api_accessible:
             self.skipTest("medRxiv API is not accessible")
             
-        papers = self.searcher.search("machine learning", max_results=1)
+        papers = self.searcher.search("health informatics", max_results=1)
         if not papers:
             self.skipTest("No papers found for testing download")
             
