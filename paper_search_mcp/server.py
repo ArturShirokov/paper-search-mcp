@@ -1623,7 +1623,11 @@ async def list_new_scielo_preprints(since: str, max_results: int = 100) -> List[
 
 @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
 async def search_preprints_ru(query: str, max_results: int = 10) -> List[Dict]:
-    """Search Preprints.ru (Russian preprints). Russian queries match far more records."""
+    """Search Preprints.ru (Russian preprints). Russian queries match far more records.
+
+    Only hits whose title or abstract contains every query word (Russian
+    inflection allowed) are returned, so an off-topic query gives [].
+    """
     return await async_search(preprints_ru_searcher, query, max_results)
 
 

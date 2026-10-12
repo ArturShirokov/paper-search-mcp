@@ -11,7 +11,8 @@ from __future__ import annotations
 import os
 import re
 from datetime import datetime
-from typing import Dict, List, Optional
+from itertools import islice
+from typing import Dict, Iterable, Iterator, List, Optional
 
 import requests
 from bs4 import BeautifulSoup
@@ -24,6 +25,35 @@ BASE_URL = "https://preprints.ru"
 _FOUND_RE = re.compile(r"найдено:\s*(\d+)")
 _ID_RE = re.compile(r'class="title">\s*<a href="https://preprints\.ru/article/(\d+)"')
 _URL_ID_RE = re.compile(r"/article/(\d+)")
+# One inflectional ending plus trailing vowels; what's left is matched as a
+# word prefix, so "распознавание" and "распознавания" both give "распознаван".
+_ENDING_RE = re.compile(
+    r"(?:ами|ями|ого|его|ому|ему|ыми|ими|ов|ев|ам|ям|ах|ях|ом|ем|ой|ей|ый|ий|ых|их|ым|им|ую|юю|ть)?[аеиоуыэюяьй]*$"
+)
+# The site's search matches loosely and never runs dry: stop after this
+# many fetched hits in a row lack the query words.
+# ponytail: a real match ranked after 10 filler hits is lost; raise this or
+# scale it with max_results if recall suffers.
+_MAX_MISSES = 10
+
+
+def _fold(text: str) -> str:
+    return text.lower().replace("ё", "е")
+
+
+def _stems(query: str) -> List[str]:
+    """Lowercased word stems of a query; Cyrillic words lose their ending."""
+    stems = []
+    for word in re.findall(r"\w+", _fold(query)):
+        stem = _ENDING_RE.sub("", word) if re.search("[а-я]", word) else word
+        # ponytail: crude stemmer, swap in Snowball if recall complaints come in.
+        stems.append(stem if len(stem) >= 3 else word[:3])
+    return stems
+
+
+def _matches(paper: Paper, stems: List[str]) -> bool:
+    text = _fold(f"{paper.title} {paper.abstract}")
+    return all(re.search(r"\b" + re.escape(stem), text) for stem in stems)
 
 
 class PreprintsRuSearcher(PaperSource):
@@ -36,8 +66,26 @@ class PreprintsRuSearcher(PaperSource):
         })
 
     def search(self, query: str, max_results: int = 10, **kwargs) -> List[Paper]:
-        """Keyword search (Russian morphology, matches abstracts too)."""
-        return self._get_articles(self._article_ids({"search_query": query}, max_results))
+        """Keyword search; keeps hits whose title or abstract has every query word.
+
+        The site's own search returns unrelated filler for any query, so each
+        hit's article page is checked for the query's word stems.
+        """
+        stems = _stems(query)
+        papers: List[Paper] = []
+        misses = 0
+        for aid in self._article_ids({"search_query": query}):
+            paper = self._get_article(aid)
+            if paper is None or not _matches(paper, stems):
+                misses += 1
+                if misses >= _MAX_MISSES:
+                    break
+                continue
+            misses = 0
+            papers.append(paper)
+            if len(papers) >= max_results:
+                break
+        return papers
 
     def list_new(self, since: str, max_results: int = 100, **kwargs) -> List[Paper]:
         """List preprints posted or revised on or after a date (YYYY-MM-DD).
@@ -47,7 +95,7 @@ class PreprintsRuSearcher(PaperSource):
         """
         datetime.strptime(since, "%Y-%m-%d")  # ValueError; "" would list everything
         params = {"search_query": "", "filters[gte][]": since}
-        return self._get_articles(self._article_ids(params, max_results))
+        return self._get_articles(islice(self._article_ids(params), max_results))
 
     def download_pdf(self, paper_id: str, save_path: str = "./downloads") -> str:
         # Version URLs (/article/<id>/version/<n>) end in the version number.
@@ -72,10 +120,11 @@ class PreprintsRuSearcher(PaperSource):
         reader = PdfReader(self.download_pdf(paper_id, save_path))
         return "\n".join(page.extract_text() or "" for page in reader.pages).strip()
 
-    def _article_ids(self, params: Dict[str, str], max_results: int) -> List[str]:
-        ids: List[str] = []
+    def _article_ids(self, params: Dict[str, str]) -> Iterator[str]:
+        """Search hit ids in rank order, fetching result pages as needed."""
+        seen: set = set()
         page = 1
-        while len(ids) < max_results:
+        while True:
             response = self.session.get(
                 f"{BASE_URL}/search", params={"page": page, **params}, timeout=30
             )
@@ -85,15 +134,15 @@ class PreprintsRuSearcher(PaperSource):
             found = _FOUND_RE.search(response.text)
             if not found:
                 raise ValueError(f"{self.SOURCE} search page has no result count")
-            new_ids = [i for i in dict.fromkeys(_ID_RE.findall(response.text)) if i not in ids]
-            ids += new_ids
+            new_ids = [i for i in dict.fromkeys(_ID_RE.findall(response.text)) if i not in seen]
+            seen.update(new_ids)
+            yield from new_ids
             # Stop on the count: a page past the end has no result list at all.
-            if not new_ids or len(ids) >= int(found.group(1)):
-                break
+            if not new_ids or len(seen) >= int(found.group(1)):
+                return
             page += 1
-        return ids[:max_results]
 
-    def _get_articles(self, ids: List[str]) -> List[Paper]:
+    def _get_articles(self, ids: Iterable[str]) -> List[Paper]:
         # ponytail: one article page per hit, sequential; thread it if latency matters.
         papers = [self._get_article(i) for i in ids]
         return [p for p in papers if p is not None]
