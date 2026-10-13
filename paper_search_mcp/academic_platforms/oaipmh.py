@@ -69,6 +69,11 @@ class OAIPMHSearcher(PaperSource):
         session: HTTP session for requests
     """
 
+    # Retry one request, not the harvest: resumption tokens may be re-sent.
+    MAX_ATTEMPTS = 3
+    MAX_RETRY_AFTER_SEC = 30
+    RETRYABLE_STATUS_CODES = frozenset((429, 500, 502, 503, 504))
+
     def __init__(self, base_url: str, metadata_prefix: str = "oai_dc"):
         """Initialize OAI-PMH searcher.
 
@@ -181,8 +186,20 @@ class OAIPMHSearcher(PaperSource):
             OAIPMHError: an OAI-PMH error reply, or a non-OAI-PMH reply.
             xml.etree.ElementTree.ParseError: the reply was not XML.
         """
-        response = self.session.get(self.base_url, params=params, timeout=30)
-        response.raise_for_status()
+        for attempt in range(1, self.MAX_ATTEMPTS + 1):
+            try:
+                response = self.session.get(self.base_url, params=params, timeout=30)
+                response.raise_for_status()
+                break
+            except requests.RequestException as e:
+                wait = self._retry_wait(e, attempt)
+                if wait is None:
+                    raise
+                logger.warning(
+                    "OAI-PMH request failed (%s), retry %s/%s in %ss",
+                    e, attempt, self.MAX_ATTEMPTS - 1, wait,
+                )
+                time.sleep(wait)
 
         root = ET.fromstring(response.content)
         if root.tag != f'{{{OAI_NS}}}OAI-PMH':
@@ -193,6 +210,26 @@ class OAIPMHSearcher(PaperSource):
         if error_elem is not None:
             raise OAIPMHError(error_elem.get('code', 'unknown'), (error_elem.text or '').strip())
         return root
+
+    def _retry_wait(self, error: requests.RequestException, attempt: int) -> Optional[float]:
+        """Seconds to wait before retrying a failed request, or None to give up.
+
+        Retries connection errors and drops, timeouts, 429 and 5xx. A Retry-After longer
+        than MAX_RETRY_AFTER_SEC means the server wants us gone for a while.
+        """
+        if attempt >= self.MAX_ATTEMPTS:
+            return None
+        if isinstance(error, requests.HTTPError):
+            response = error.response
+            if response is None or response.status_code not in self.RETRYABLE_STATUS_CODES:
+                return None
+            retry_after = response.headers.get('Retry-After', '')
+            if retry_after.isdigit():
+                seconds = int(retry_after)
+                return seconds if seconds <= self.MAX_RETRY_AFTER_SEC else None
+        elif not isinstance(error, (requests.ConnectionError, requests.Timeout, requests.exceptions.ChunkedEncodingError)):
+            return None
+        return 2.0 * attempt
 
     def _parse_oai_record(self, record: ET.Element) -> Optional[Paper]:
         """Parse OAI-PMH record to Paper object.
