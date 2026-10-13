@@ -102,5 +102,41 @@ class TestPaperSearchServer(unittest.TestCase):
                 self.assertTrue(result.endswith(".pdf"), f"Result for {paper_id} should be a PDF file path")
                 self.assertTrue(os.path.exists(result), f"PDF file for {paper_id} should exist on disk")
 
+
+class TestUnifiedSearchSkipsCategoryOnlySources(unittest.TestCase):
+    def _search(self, query, sources):
+        arxiv = AsyncMock(return_value=[])
+        biorxiv = AsyncMock(return_value=[])
+        medrxiv = AsyncMock(return_value=[])
+        with (
+            patch.object(server, "ALL_SOURCES", ["arxiv", "biorxiv", "medrxiv"]),
+            patch.object(server, "search_arxiv", new=arxiv),
+            patch.object(server, "search_biorxiv", new=biorxiv),
+            patch.object(server, "search_medrxiv", new=medrxiv),
+        ):
+            result = asyncio.run(server.search_papers(query, sources=sources))
+        return result, biorxiv, medrxiv
+
+    def test_all_skips_biorxiv_medrxiv_for_keyword_query(self):
+        result, biorxiv, medrxiv = self._search("machine learning", "all")
+        self.assertEqual(result["sources_used"], ["arxiv"])
+        self.assertEqual(result["errors"], {})
+        self.assertEqual(set(result["skipped"]), {"biorxiv", "medrxiv"})
+        biorxiv.assert_not_called()
+        medrxiv.assert_not_called()
+
+    def test_all_keeps_biorxiv_for_its_category(self):
+        result, biorxiv, _ = self._search("neuroscience", "all")
+        self.assertIn("biorxiv", result["sources_used"])
+        self.assertEqual(set(result["skipped"]), {"medrxiv"})
+        biorxiv.assert_awaited_once()
+
+    def test_explicit_source_is_never_skipped(self):
+        result, biorxiv, _ = self._search("machine learning", "biorxiv")
+        self.assertEqual(result["sources_used"], ["biorxiv"])
+        self.assertNotIn("skipped", result)
+        biorxiv.assert_awaited_once()
+
+
 if __name__ == "__main__":
     unittest.main()

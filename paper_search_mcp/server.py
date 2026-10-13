@@ -604,13 +604,24 @@ async def search_papers(
             Available: arxiv,pubmed,biorxiv,medrxiv,google_scholar,iacr,semantic,crossref,openalex,pmc,core,europepmc,dblp,openaire,citeseerx,doaj,base,zenodo,hal,jxiv,scielo_preprints,preprints_ru,chinarxiv,cyberleninka,ssrn,openreview,unpaywall
         year: Optional year filter for Semantic Scholar only.
     Returns:
-        Aggregated dictionary with per-source stats, errors, and deduplicated papers.
+        Aggregated dictionary with per-source stats, errors, skipped sources
+        (bioRxiv/medRxiv under 'all' when the query isn't a category, DOI or
+        date range), and deduplicated papers.
     """
     selected_sources = _parse_sources(sources)
     invalid_sources = _invalid_sources(sources)
     errors: Dict[str, str] = {
         source: "Unknown or unavailable source." for source in invalid_sources
     }
+    # Category-only sources would error on every keyword query under "all";
+    # report them as skipped. Naming them explicitly still surfaces the error.
+    skipped: Dict[str, str] = {}
+    if not sources or sources.strip().lower() == "all":
+        for name, searcher in (("biorxiv", biorxiv_searcher), ("medrxiv", medrxiv_searcher)):
+            reason = searcher.skip_reason(query)
+            if reason and name in selected_sources:
+                skipped[name] = reason
+        selected_sources = [source for source in selected_sources if source not in skipped]
 
     if not selected_sources:
         errors["sources"] = "No valid sources selected."
@@ -717,7 +728,7 @@ async def search_papers(
 
     deduped_papers = _dedupe_papers(merged_papers)
 
-    return {
+    result = {
         "query": query,
         "sources_requested": sources,
         "sources_used": source_names,
@@ -727,6 +738,9 @@ async def search_papers(
         "total": len(deduped_papers),
         "raw_total": len(merged_papers),
     }
+    if skipped:
+        result["skipped"] = skipped
+    return result
 
 
 @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})

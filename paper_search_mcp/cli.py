@@ -241,6 +241,15 @@ async def cmd_search(args: argparse.Namespace) -> int:
         print(json.dumps({"error": "No valid sources selected", "available": sorted(_available_sources())}))
         return 1
 
+    # Mirrors search_papers: under "all", skip category-only sources for keyword queries.
+    skipped: Dict[str, str] = {}
+    if (args.sources or "all").strip().lower() == "all":
+        for name, searcher_cls in (("biorxiv", BioRxivSearcher), ("medrxiv", MedRxivSearcher)):
+            reason = searcher_cls.skip_reason(args.query)
+            if reason and name in selected:
+                skipped[name] = reason
+        selected = [src for src in selected if src not in skipped]
+
     tasks = {}
     jobs = []
     source_timeout = getattr(args, "source_timeout", None)
@@ -295,6 +304,8 @@ async def cmd_search(args: argparse.Namespace) -> int:
         "total": len(deduped),
         "papers": deduped,
     }
+    if skipped:
+        output["skipped"] = skipped
     print(json.dumps(output, indent=2, default=str))
     return 0
 

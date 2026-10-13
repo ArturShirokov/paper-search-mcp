@@ -48,6 +48,26 @@ class BioRxivSearcher(PaperSource):
     def _normalize_category(category: str) -> str:
         return re.sub(r"[\s/-]+", "_", category.strip().lower())
 
+    @classmethod
+    def _is_category(cls, query: str) -> bool:
+        return cls._normalize_category(query).replace("_", " ") in cls.CATEGORIES
+
+    @classmethod
+    def skip_reason(cls, query: str) -> str | None:
+        """Short reason the unified "all" search should skip this query, or None."""
+        query = (query or "").strip()
+        if (
+            not query
+            or extract_doi(query)
+            or cls.DATE_RANGE_PATTERN.match(query)
+            or cls._is_category(query)
+        ):
+            return None
+        return (
+            f"{cls.LABEL} has no keyword search; query is not a category, DOI "
+            f"or date range (search_{cls.SERVER} lists categories)"
+        )
+
     def _resolve_query_mode(
         self, query: str, days: int
     ) -> tuple[str, str, str, str | None]:
@@ -74,14 +94,13 @@ class BioRxivSearcher(PaperSource):
         start_date = (today - timedelta(days=days)).isoformat()
         if not normalized_query:
             return "interval", start_date, end_date, None
-        category = self._normalize_category(normalized_query)
-        if category.replace("_", " ") not in self.CATEGORIES:
+        if not self._is_category(normalized_query):
             raise ValueError(
                 f"{normalized_query!r} is not a {self.LABEL} category, DOI or "
                 f"date range ({self.LABEL} has no keyword search). Categories: "
                 + ", ".join(sorted(self.CATEGORIES))
             )
-        return "interval", start_date, end_date, category
+        return "interval", start_date, end_date, self._normalize_category(normalized_query)
 
     def _request_json(self, url: str) -> dict:
         for attempt in range(1, self.max_retries + 1):

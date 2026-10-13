@@ -139,3 +139,16 @@ def test_unknown_category_raises_naming_valid_ones(searcher):
 def test_known_category_matches_case_and_separators(searcher):
     searcher.search("Pharmacology-and-Toxicology", max_results=1)
     assert "?category=pharmacology_and_toxicology" in searcher.session.get.call_args.args[0]
+
+
+@pytest.mark.parametrize("query", [
+    "", "Cell Biology", "10.1101/2023.12.30.573731", "2024-01-01/2024-01-31",
+])
+def test_skip_reason_is_none_for_supported_queries(query):
+    assert BioRxivSearcher.skip_reason(query) is None
+
+
+def test_skip_reason_is_short_for_free_text():
+    reason = BioRxivSearcher.skip_reason("historical document OCR")
+    assert "keyword search" in reason
+    assert "bioinformatics" not in reason

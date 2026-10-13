@@ -140,3 +140,22 @@ def test_cmd_search_passes_openalex_filter_only_to_openalex(monkeypatch, capsys,
     capsys.readouterr()
     searchers["openalex"].search.assert_called_once_with("q", max_results=2, **expected)
     searchers["arxiv"].search.assert_called_once_with("q", max_results=2)
+
+
+def test_cmd_search_all_skips_category_only_sources_for_keywords(monkeypatch, capsys):
+    searchers = install_searchers(monkeypatch, {"arxiv": [], "biorxiv": [], "medrxiv": []})
+    args = cli.build_parser().parse_args(["search", "machine learning"])
+    assert asyncio.run(cli.cmd_search(args)) == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["sources_used"] == ["arxiv"]
+    assert output["errors"] == {}
+    assert set(output["skipped"]) == {"biorxiv", "medrxiv"}
+    searchers["biorxiv"].search.assert_not_called()
+
+
+def test_cmd_search_explicit_category_only_source_still_runs(monkeypatch, capsys):
+    searchers = install_searchers(monkeypatch, {"biorxiv": []})
+    args = cli.build_parser().parse_args(["search", "machine learning", "-s", "biorxiv"])
+    assert asyncio.run(cli.cmd_search(args)) == 0
+    assert "skipped" not in json.loads(capsys.readouterr().out)
+    searchers["biorxiv"].search.assert_called_once()
