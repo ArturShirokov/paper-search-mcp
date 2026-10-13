@@ -185,9 +185,14 @@ class BioRxivSearcher(PaperSource):
                 break
 
             papers.extend(self._parse_papers(collection))
-            if len(collection) < 100:
+            # Page size has changed before (100 -> 30), so follow what the reply reports.
+            cursor += len(collection)
+            try:
+                total = int((data.get("messages") or [{}])[0]["total"])
+            except (KeyError, IndexError, TypeError, ValueError):
+                continue
+            if cursor >= total:
                 break
-            cursor += 100
 
         return papers[:max_results]
 

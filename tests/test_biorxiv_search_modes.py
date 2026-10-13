@@ -7,10 +7,23 @@ import requests
 from paper_search_mcp.academic_platforms.biorxiv import BioRxivSearcher
 
 
-def _mock_response(collection):
+def _mock_response(collection, messages=None):
     response = Mock(status_code=200, headers={})
     response.json.return_value = {"collection": collection}
+    if messages is not None:
+        response.json.return_value["messages"] = messages
     return response
+
+
+def _feed_page(cursor, count, total):
+    """A page shaped like the live reply recorded 2026-10-12 (30 items, total as a string)."""
+    messages = [{
+        "status": "ok", "category": "neuroscience",
+        "interval": "2026-09-12:2026-10-12", "cursor": cursor if cursor == 0 else str(cursor),
+        "count": count, "count_new_papers": "1017", "total": str(total),
+    }]
+    items = [_paper_item(f"10.1101/2026.09.{cursor + i:05d}") for i in range(count)]
+    return _mock_response(items, messages)
 
 
 def _paper_item(doi="10.1101/2023.12.30.573731"):
@@ -87,6 +100,25 @@ def test_interval_search_advances_cursor_for_full_page(searcher):
         "/100/json?category=bioinformatics"
         in (searcher.session.get.call_args_list[1].args[0])
     )
+
+
+def test_feed_pages_by_reported_count_until_max_results(searcher):
+    searcher.session.get.side_effect = [_feed_page(c, 30, 1421) for c in (0, 30, 60)]
+
+    papers = searcher.search("neuroscience", max_results=75)
+
+    assert len(papers) == 75
+    urls = [call.args[0] for call in searcher.session.get.call_args_list]
+    assert ["/0/json?" in urls[0], "/30/json?" in urls[1], "/60/json?" in urls[2]] == [True] * 3
+
+
+def test_feed_stops_at_reported_total_without_extra_request(searcher):
+    searcher.session.get.side_effect = [_feed_page(0, 30, 50), _feed_page(30, 20, 50)]
+
+    papers = searcher.search("neuroscience", max_results=100)
+
+    assert len(papers) == 50
+    assert searcher.session.get.call_count == 2
 
 
 def test_zero_results_does_not_call_api(searcher):
