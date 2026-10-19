@@ -103,7 +103,7 @@ This matrix reflects **verified live-integration results** from functional and e
 | IACR | ✅ | ✅ | ✅ | Open API; reliable |
 | Semantic Scholar | ✅ | ✅ (OA) | ✅ (OA) | Works without key (rate-limited); key improves limits; key rejection (403) retried automatically without key |
 | Crossref | ✅ | ❌ | ⚠️ info-only | Open API; reliable |
-| OpenAlex | ✅ | ✅ (OA PDF links) | ✅ (OA PDF links) | Downloads the work's open-access PDF location, verified against its title. Keyless budget is about 100 searches/day (1,000 credits, 10 per search); set `PAPER_SEARCH_MCP_OPENALEX_API_KEY` (free) for more |
+| OpenAlex | ✅ | ✅ (OA PDF links) | ✅ (OA PDF links) | Downloads the work's open-access PDF location; HTML and landing pages are rejected, but the title is not checked (scans and translations lack it). Keyless budget is about 100 searches/day (1,000 credits, 10 per search); set `PAPER_SEARCH_MCP_OPENALEX_API_KEY` (free) for more |
 | PMC | ✅ | ✅ (OA only) | ✅ (OA only) | OA PDFs only; direct download may be blocked by some proxy environments |
 | CORE | ✅ | ✅ (record-dependent) | ✅ (record-dependent) | Free key recommended; connector retries with backoff and falls back to key-less on 401/403 |
 | Europe PMC | ✅ | ✅ (OA) | ✅ (OA) | OA PDFs only; direct download may be blocked by some proxy environments |
@@ -163,7 +163,7 @@ Some search failures are caused by external provider instability, not by bugs in
 | OpenAlex | `OpenAlex returned HTTP 429 (Retry-After: …)` in `errors` | Keyless daily budget (about 100 searches) spent; Retry-After is in seconds and can be hours | Set `PAPER_SEARCH_MCP_OPENALEX_API_KEY` |
 | CORE | 500 / timeout errors | Unauthenticated rate limiting | Set `PAPER_SEARCH_MCP_CORE_API_KEY` (free); connector retries with exponential backoff and falls back to key-less on 401/403 |
 | OpenAIRE | Transient 403 responses | IP-based session rate limiting | Connector retries 3× per profile, escalating: plain session → XML Accept header → raw `requests.get` with Mozilla UA |
-| CiteSeerX | 404 via web archive redirect | PSU endpoint intermittently redirects to archive | No workaround; reported as a source error |
+| CiteSeerX | 404 via web archive redirect | Service is retired; every call redirects to the Wayback Machine | No workaround; skipped under `all`, an explicit `citeseerx` request reports a source error |
 | BASE | `OAI-PMH error notOAIPMH: Access denied …` in `errors` | OAI-PMH endpoint requires institutional IP registration | Register at [base-search.net](https://www.base-search.net/about/en/) for API access |
 | SSRN full text | HTTP 403 or identity unavailable | Public page/PDF delivery may be restricted | Search uses OpenAlex; download reports failure without login, redirects or HTML search fallback |
 | PMC / Europe PMC | PDF download ProxyError | Local proxy blocking direct HTTPS PDF download | Disable proxy or use `download_with_fallback` instead |

@@ -43,6 +43,11 @@ async def strict_and_notes(
                 f"No result matched every word of '{query}' (this source requires all of them). "
                 f"The shorter query '{shorter}' does match."
             )
+        elif isinstance(output, BaseException):
+            # The retry failed, so we don't know whether fewer words would help.
+            notes[source] = (
+                f"No result matched every word of '{query}'; this source requires every query word."
+            )
         else:
             notes[source] = (
                 f"No result matched every word of '{query}'; this source requires every query word. "

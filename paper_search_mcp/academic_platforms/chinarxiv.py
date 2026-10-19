@@ -20,6 +20,7 @@ import requests
 
 from ..config import get_env
 from ..paper import Paper
+from ..utils import extract_doi
 from .base import PaperSource, check_response
 
 BASE_URL = "https://chinarxiv.org"
@@ -27,7 +28,6 @@ API_URL = f"{BASE_URL}/api/v1/papers"
 
 # Some records carry the journal's header line as the title: a bare DOI,
 # "CN 53-1189/P ISSN 1672-7673", or "Journal, 2025, 66(1): 4".
-_DOI = re.compile(r"10\.\d{4,9}/\S+")
 _HEADER_TITLE = re.compile(
     r"\s*(?:(?:doi:?\s*)?10\.\d{4,9}/\S+|(?:(?:CN|ISSN)\s*\d[\dX/A-Z-]*[\s,;]*)+)\s*"
     r"|.*\b(?:19|20)\d{2}\s*,\s*(?:Vol\.?\s*)?\d+\s*\(\s*\d+\s*\).*",
@@ -125,8 +125,7 @@ class ChinaRxivSearcher(PaperSource):
         extra: Dict[str, Any] = {}
         if title and _HEADER_TITLE.fullmatch(title):
             # The API record holds no other title field, so flag it instead.
-            found = _DOI.search(title)
-            doi = found.group(0) if found else ""
+            doi = extract_doi(title)
             title = ""
             extra["title_unreliable"] = True
         return Paper(

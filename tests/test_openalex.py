@@ -257,6 +257,12 @@ class TestOpenAlexDownload(unittest.TestCase):
             self.searcher.download_pdf("W7213893935", self.tmp)
         self.assertEqual(os.listdir(self.tmp), [])
 
+    def test_pdf_without_the_title_on_page_one_is_still_saved(self):
+        # Scanned or translated OA PDFs don't carry the OpenAlex title as text.
+        self._serve(pdf_body=_pdf("Obzor metodov mashinnogo obucheniya"))
+        path = self.searcher.download_pdf("W7213893935", self.tmp)
+        self.assertEqual(os.path.basename(path), "openalex_W7213893935.pdf")
+
     def test_work_without_oa_pdf_raises_naming_the_work(self):
         work = {**WORK, "best_oa_location": None,
                 "locations": [{"is_oa": False, "landing_page_url": "https://x.org", "pdf_url": None}]}

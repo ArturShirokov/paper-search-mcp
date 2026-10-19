@@ -17,8 +17,10 @@ _ENDING_RE = re.compile(
     r"(?:ами|ями|ого|его|ому|ему|ыми|ими|ов|ев|ам|ям|ах|ях|ом|ем|ой|ей|ый|ий|ых|их|ым|им|ую|юю|ть)?[аеиоуыэюяьй]*$"
 )
 # A stem ending in е/о plus one consonant may lose that vowel when inflected
-# (лёд/льда, сон/сна, отец/отца).
-_FLEETING_RE = re.compile(r"^(.+)[ео]([бвгджзклмнпрстфхцчшщ])$")
+# (лёд/льда, сон/сна, отец/отца). The vowel-less form must end the word
+# with a case ending, so "лёд" doesn't match "лодка" nor "сон" "снег".
+_FLEETING_RE = re.compile(r"^(.+)([ео])([бвгджзклмнпрстфхцчшщ])$")
+_CASE_ENDING = r"(?:ами|ями|ом|ем|ов|ев|ам|ям|ах|ях|ей|ой|а|я|у|ю|е|ы|и)\b"
 
 
 def fold(text: str) -> str:
@@ -38,7 +40,8 @@ def query_stems(query: str) -> List[str]:
 def _stem_pattern(stem: str) -> str:
     fleeting = _FLEETING_RE.match(stem)
     if fleeting:
-        return re.escape(fleeting.group(1)) + "[еоь]?" + fleeting.group(2)
+        head, vowel, tail = map(re.escape, fleeting.groups())
+        return f"{head}(?:{vowel}{tail}|ь?{tail}{_CASE_ENDING})"
     return re.escape(stem)
 
 
