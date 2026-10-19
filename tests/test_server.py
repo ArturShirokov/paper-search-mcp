@@ -174,6 +174,11 @@ class TestStrictAndNotes(unittest.TestCase):
         self.assertIn("every query word", note)
         self.assertNotIn("2-3 words", note)
 
+    def test_every_strict_and_source_has_a_search_tool(self):
+        from paper_search_mcp.strict_query import STRICT_AND_SOURCES
+        for source in STRICT_AND_SOURCES:
+            self.assertTrue(callable(getattr(server, f"search_{source}", None)), source)
+
     def test_two_word_query_gets_no_retry_or_note(self):
         result, chinarxiv = self._search({}, query="lunar ice")
         self.assertEqual(chinarxiv.await_count, 1)

@@ -607,7 +607,8 @@ async def search_papers(
         year: Optional year filter for Semantic Scholar only.
     Returns:
         Aggregated dictionary with per-source stats, errors, skipped sources
-        (under 'all': dblp, behind a bot wall; bioRxiv/medRxiv when the query
+        (under 'all': dblp, behind a bot wall; CiteSeerX, offline; BASE, which
+        refuses unregistered IPs; bioRxiv/medRxiv when the query
         isn't a category, DOI or date range), notes (why a strict all-words
         source returned nothing, and a shorter query that matches), and
         deduplicated papers.
@@ -729,16 +730,11 @@ async def search_papers(
 
     deduped_papers = _dedupe_papers(merged_papers)
 
-    strict_searches = {
-        "arxiv": search_arxiv,
-        "chinarxiv": search_chinarxiv,
-        "preprints_ru": search_preprints_ru,
-        "cyberleninka": search_cyberleninka,
-    }
+    # Every STRICT_AND_SOURCES name has a search_<name> tool in this module.
     notes = await strict_and_notes(
         query, source_results, errors,
         lambda source, shorter: _run_search_with_timeout(
-            source, strict_searches[source](shorter, max_results_per_source)
+            source, globals()[f"search_{source}"](shorter, max_results_per_source)
         ),
     )
 
