@@ -19,41 +19,18 @@ from bs4 import BeautifulSoup
 
 from ..paper import Paper
 from .base import PaperSource
+from .ru_stems import matches_stems, query_stems
 
 BASE_URL = "https://preprints.ru"
 
 _FOUND_RE = re.compile(r"найдено:\s*(\d+)")
 _ID_RE = re.compile(r'class="title">\s*<a href="https://preprints\.ru/article/(\d+)"')
 _URL_ID_RE = re.compile(r"/article/(\d+)")
-# One inflectional ending plus trailing vowels; what's left is matched as a
-# word prefix, so "распознавание" and "распознавания" both give "распознаван".
-_ENDING_RE = re.compile(
-    r"(?:ами|ями|ого|его|ому|ему|ыми|ими|ов|ев|ам|ям|ах|ях|ом|ем|ой|ей|ый|ий|ых|их|ым|им|ую|юю|ть)?[аеиоуыэюяьй]*$"
-)
 # The site's search matches loosely and never runs dry: stop after this
 # many fetched hits in a row lack the query words.
 # ponytail: a real match ranked after 10 filler hits is lost; raise this or
 # scale it with max_results if recall suffers.
 _MAX_MISSES = 10
-
-
-def _fold(text: str) -> str:
-    return text.lower().replace("ё", "е")
-
-
-def _stems(query: str) -> List[str]:
-    """Lowercased word stems of a query; Cyrillic words lose their ending."""
-    stems = []
-    for word in re.findall(r"\w+", _fold(query)):
-        stem = _ENDING_RE.sub("", word) if re.search("[а-я]", word) else word
-        # ponytail: crude stemmer, swap in Snowball if recall complaints come in.
-        stems.append(stem if len(stem) >= 3 else word[:3])
-    return stems
-
-
-def _matches(paper: Paper, stems: List[str]) -> bool:
-    text = _fold(f"{paper.title} {paper.abstract}")
-    return all(re.search(r"\b" + re.escape(stem), text) for stem in stems)
 
 
 class PreprintsRuSearcher(PaperSource):
@@ -71,12 +48,12 @@ class PreprintsRuSearcher(PaperSource):
         The site's own search returns unrelated filler for any query, so each
         hit's article page is checked for the query's word stems.
         """
-        stems = _stems(query)
+        stems = query_stems(query)
         papers: List[Paper] = []
         misses = 0
         for aid in self._article_ids({"search_query": query}):
             paper = self._get_article(aid)
-            if paper is None or not _matches(paper, stems):
+            if paper is None or not matches_stems(paper, stems):
                 misses += 1
                 if misses >= _MAX_MISSES:
                     break
