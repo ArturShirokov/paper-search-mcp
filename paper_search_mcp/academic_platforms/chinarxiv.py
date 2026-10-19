@@ -25,6 +25,15 @@ from .base import PaperSource, check_response
 BASE_URL = "https://chinarxiv.org"
 API_URL = f"{BASE_URL}/api/v1/papers"
 
+# Some records carry the journal's header line as the title: a bare DOI,
+# "CN 53-1189/P ISSN 1672-7673", or "Journal, 2025, 66(1): 4".
+_DOI = re.compile(r"10\.\d{4,9}/\S+")
+_HEADER_TITLE = re.compile(
+    r"\s*(?:(?:doi:?\s*)?10\.\d{4,9}/\S+|(?:(?:CN|ISSN)\s*\d[\dX/A-Z-]*[\s,;]*)+)\s*"
+    r"|.*\b(?:19|20)\d{2}\s*,\s*(?:Vol\.?\s*)?\d+\s*\(\s*\d+\s*\).*",
+    re.IGNORECASE,
+)
+
 
 class ChinaRxivSearcher(PaperSource):
     """Search translated ChinaXiv (and SovietRxiv) papers."""
@@ -111,12 +120,21 @@ class ChinaRxivSearcher(PaperSource):
             published = datetime.strptime(date, "%Y-%m-%d")
         except ValueError:
             published = None
+        title = (record.get("title") or "").strip()
+        doi = ""
+        extra: Dict[str, Any] = {}
+        if title and _HEADER_TITLE.fullmatch(title):
+            # The API record holds no other title field, so flag it instead.
+            found = _DOI.search(title)
+            doi = found.group(0) if found else ""
+            title = ""
+            extra["title_unreliable"] = True
         return Paper(
             paper_id=paper_id,
-            title=record.get("title") or "",
+            title=title,
             authors=authors,
             abstract=record.get("abstract") or "",
-            doi="",
+            doi=doi,
             published_date=published,
             pdf_url=f"{API_URL}/{paper_id}/pdf" if record.get("has_pdf") else "",
             url=f"{BASE_URL}/items/{paper_id}",
@@ -128,5 +146,6 @@ class ChinaRxivSearcher(PaperSource):
                 "source_language": record.get("source_language") or "",
                 # "machine_generated" means a model wrote the abstract, not the authors.
                 "abstract_source": record.get("abstract_source") or "",
+                **extra,
             },
         )
