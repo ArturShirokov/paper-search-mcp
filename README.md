@@ -128,6 +128,8 @@ This matrix reflects **verified live-integration results** from functional and e
 
 > ✅ = reliable in live tests.  ⚠️ = works but subject to upstream instability or access restrictions.  ❌ = not supported.  🔑 = key required.  🚧 = skeleton only.
 
+> arXiv, ChinaRxiv, Preprints.ru and CyberLeninka match only papers that contain every query word. When one of them returns nothing for a query of 3+ words, the unified search retries once without the last word and explains the empty result under `notes` (the retry's papers are not returned).
+
 ---
 
 ## Credential & API Key Requirements

@@ -138,5 +138,34 @@ class TestUnifiedSearchSkipsCategoryOnlySources(unittest.TestCase):
         biorxiv.assert_awaited_once()
 
 
+
+class TestStrictAndNotes(unittest.TestCase):
+    PAPER = {"paper_id": "c1", "title": "Lunar water ice", "authors": "A", "doi": ""}
+
+    def _search(self, by_query, query="lunar water ice extraction"):
+        chinarxiv = AsyncMock(side_effect=lambda q, n: by_query.get(q, []))
+        with patch.object(server, "search_chinarxiv", new=chinarxiv):
+            result = asyncio.run(server.search_papers(query, sources="chinarxiv"))
+        return result, chinarxiv
+
+    def test_zero_result_query_names_shorter_query_that_matches(self):
+        result, _ = self._search({"lunar water ice": [self.PAPER]})
+        self.assertEqual(result["papers"], [])
+        self.assertEqual(result["errors"], {})
+        self.assertIn("'lunar water ice'", result["notes"]["chinarxiv"])
+
+    def test_zero_result_query_and_shorter_query_both_empty(self):
+        result, chinarxiv = self._search({})
+        self.assertEqual(chinarxiv.await_count, 2)
+        note = result["notes"]["chinarxiv"]
+        self.assertIn("every query word", note)
+        self.assertNotIn("'lunar water ice'", note)
+
+    def test_two_word_query_gets_no_retry_or_note(self):
+        result, chinarxiv = self._search({}, query="lunar ice")
+        self.assertEqual(chinarxiv.await_count, 1)
+        self.assertNotIn("notes", result)
+
+
 if __name__ == "__main__":
     unittest.main()
