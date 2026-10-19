@@ -103,7 +103,7 @@ This matrix reflects **verified live-integration results** from functional and e
 | IACR | ✅ | ✅ | ✅ | Open API; reliable |
 | Semantic Scholar | ✅ | ✅ (OA) | ✅ (OA) | Works without key (rate-limited); key improves limits; key rejection (403) retried automatically without key |
 | Crossref | ✅ | ❌ | ⚠️ info-only | Open API; reliable |
-| OpenAlex | ✅ | ✅ (OA PDF links) | ✅ (OA PDF links) | Downloads the work's open-access PDF location, verified against its title. Keyless budget is about 100 searches/day (1,000 credits, 10 per search); set `PAPER_SEARCH_MCP_OPENALEX_API_KEY` (free) for more |
+| OpenAlex | ✅ | ✅ (OA PDF links) | ✅ (OA PDF links) | Downloads the work's open-access PDF location; HTML and landing pages are rejected, but the title is not checked (scans and translations lack it). Keyless budget is about 100 searches/day (1,000 credits, 10 per search); set `PAPER_SEARCH_MCP_OPENALEX_API_KEY` (free) for more |
 | PMC | ✅ | ✅ (OA only) | ✅ (OA only) | OA PDFs only; direct download may be blocked by some proxy environments |
 | CORE | ✅ | ✅ (record-dependent) | ✅ (record-dependent) | Free key recommended; connector retries with backoff and falls back to key-less on 401/403 |
 | Europe PMC | ✅ | ✅ (OA) | ✅ (OA) | OA PDFs only; direct download may be blocked by some proxy environments |

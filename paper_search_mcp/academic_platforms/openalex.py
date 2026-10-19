@@ -352,7 +352,7 @@ class OpenAlexSearcher(PaperSource):
         """Save the work's open-access PDF (best location first, then the rest).
 
         Accepts an OpenAlex work ID or a DOI. Raises ValueError when no
-        location yields a real PDF of this work.
+        location yields a readable PDF.
         """
         from .openalex_relations import normalize_identifier
         response = self.session.get(
@@ -373,10 +373,9 @@ class OpenAlexSearcher(PaperSource):
                     url, headers={"Authorization": None}, timeout=60, stream=True
                 )
                 check_response(pdf, "PDF host")
-                return save_verified_pdf(
-                    pdf, Path(save_path) / f"openalex_{work_id}.pdf",
-                    work.get("display_name") or "",
-                )
+                # Real OA PDFs may lack the OpenAlex title as text (scans,
+                # translations), so only require a readable PDF.
+                return save_verified_pdf(pdf, Path(save_path) / f"openalex_{work_id}.pdf", None)
             except (requests.RequestException, ValueError) as exc:
                 reason = str(exc)
         raise ValueError(f"OpenAlex work {work_id or paper_id} has no downloadable PDF: {reason}")
