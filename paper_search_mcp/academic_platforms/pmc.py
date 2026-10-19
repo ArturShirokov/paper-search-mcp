@@ -144,10 +144,13 @@ class PMCSearcher(PaperSource):
                 doi = next((value for value in article_ids if value.startswith('10.')), '')
 
             pub_date = None
-            pub_date_raw = _item_text('PubDate')
-            for fmt in ('%Y %b %d', '%Y %b', '%Y'):
+            # Prefer the electronic date; '2026 Sep-Oct' keeps its first month,
+            # '2026 Fall' falls back to the year.
+            pub_date_raw = (_item_text('EPubDate') or _item_text('PubDate')).split('-')[0].strip()
+            for fmt, text in (('%Y %b %d', pub_date_raw), ('%Y %b', pub_date_raw),
+                              ('%Y', pub_date_raw[:4])):
                 try:
-                    pub_date = datetime.strptime(pub_date_raw, fmt)
+                    pub_date = datetime.strptime(text, fmt)
                     break
                 except ValueError:
                     continue

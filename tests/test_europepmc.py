@@ -1,4 +1,5 @@
 """Europe PMC search failures must raise, not look like zero results (#5)."""
+from datetime import datetime
 from unittest.mock import Mock
 
 import pytest
@@ -51,3 +52,25 @@ def test_genuine_empty_is_empty():
         return_value=_reply(json_data={"hitCount": 0, "resultList": {"result": []}})
     )
     assert searcher.search("graphs") == []
+
+
+def _hit(**fields):
+    # Trimmed from a recorded Europe PMC search reply (2026-10-19).
+    return {"hitCount": 1, "resultList": {"result": [
+        {"id": "42829072", "source": "MED", "pubYear": "2026",
+         "title": "CRISPR-based genome editing of smooth muscle cells", **fields}
+    ]}}
+
+
+def test_uses_first_publication_date():
+    searcher = EuropePMCSearcher()
+    searcher.session.get = Mock(return_value=_reply(json_data=_hit(firstPublicationDate="2026-10-03")))
+    [paper] = searcher.search("CRISPR")
+    assert paper.published_date == datetime(2026, 10, 3)
+
+
+def test_falls_back_to_pub_year():
+    searcher = EuropePMCSearcher()
+    searcher.session.get = Mock(return_value=_reply(json_data=_hit()))
+    [paper] = searcher.search("CRISPR")
+    assert paper.published_date == datetime(2026, 1, 1)

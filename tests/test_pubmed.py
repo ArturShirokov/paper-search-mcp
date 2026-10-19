@@ -1,4 +1,5 @@
 import unittest
+from datetime import datetime
 from unittest.mock import Mock, patch
 
 import requests
@@ -77,6 +78,41 @@ class TestPubMedSearchErrors(unittest.TestCase):
 
     def test_genuine_empty_is_empty(self):
         self.assertEqual(self._search(_reply(content=EMPTY_ESEARCH)), [])
+
+
+def _efetch(dates):
+    # Trimmed from a recorded efetch reply for PMID 42829072 (2026-10-19).
+    return ("<PubmedArticleSet><PubmedArticle><MedlineCitation><PMID>42829072</PMID>"
+            "<Article><Journal><JournalIssue>" + dates[0] + "</JournalIssue></Journal>"
+            "<ArticleTitle>CRISPR-based genome editing of smooth muscle cells</ArticleTitle>"
+            + dates[1] + "</Article></MedlineCitation></PubmedArticle></PubmedArticleSet>").encode()
+
+
+class TestPubMedDates(unittest.TestCase):
+    """Dates keep their month and day, not just the year (#12)."""
+
+    def _date(self, pub_date, article_date=""):
+        with patch("paper_search_mcp.academic_platforms.pubmed.requests.get",
+                   side_effect=[_reply(content=ONE_ESEARCH),
+                                _reply(content=_efetch((pub_date, article_date)))]):
+            [paper] = PubMedSearcher().search("test")
+        return paper.published_date
+
+    def test_prefers_electronic_article_date(self):
+        self.assertEqual(
+            self._date("<PubDate><Year>2026</Year><Month>Nov</Month></PubDate>",
+                       '<ArticleDate DateType="Electronic"><Year>2026</Year>'
+                       "<Month>10</Month><Day>03</Day></ArticleDate>"),
+            datetime(2026, 10, 3))
+
+    def test_pub_date_with_month_name(self):
+        self.assertEqual(
+            self._date("<PubDate><Year>2026</Year><Month>Oct</Month><Day>03</Day></PubDate>"),
+            datetime(2026, 10, 3))
+
+    def test_pub_date_year_only(self):
+        self.assertEqual(self._date("<PubDate><Year>2026</Year></PubDate>"),
+                         datetime(2026, 1, 1))
 
 
 if __name__ == "__main__":

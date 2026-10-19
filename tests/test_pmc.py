@@ -1,4 +1,5 @@
 """PMC search failures must raise, not look like zero results (#5)."""
+from datetime import datetime
 from unittest.mock import Mock
 
 import pytest
@@ -67,3 +68,29 @@ def test_genuine_empty_is_empty():
     searcher = PMCSearcher()
     searcher.session.get = Mock(return_value=_reply(content=ESEARCH_EMPTY))
     assert searcher.search("graphs") == []
+
+
+def _summary(pub_date, epub_date):
+    # Trimmed from a recorded esummary reply for PMC13677170 (2026-10-19).
+    return _reply(content=(
+        "<eSummaryResult><DocSum><Id>123</Id>"
+        f'<Item Name="PubDate" Type="Date">{pub_date}</Item>'
+        f'<Item Name="EPubDate" Type="Date">{epub_date}</Item>'
+        '<Item Name="Title" Type="String">Human iPSC-derived fetal granulosa-like cells</Item>'
+        "</DocSum></eSummaryResult>"
+    ).encode())
+
+
+@pytest.mark.parametrize("pub_date, epub_date, expected", [
+    ("2026 Oct 1", "2026 Jul 24", datetime(2026, 7, 24)),  # EPubDate wins
+    ("2026 Oct 18", "", datetime(2026, 10, 18)),
+    ("2026 Sep-Oct", "", datetime(2026, 9, 1)),  # range: first month
+    ("2026 Fall", "", datetime(2026, 1, 1)),  # season: year only
+])
+def test_summary_dates(pub_date, epub_date, expected):
+    searcher = PMCSearcher()
+    searcher.session.get = Mock(
+        side_effect=[_reply(content=ESEARCH_ONE), _summary(pub_date, epub_date)]
+    )
+    [paper] = searcher.search("graphs")
+    assert paper.published_date == expected
