@@ -195,3 +195,60 @@ def test_rate_limit_reports_retry_after(searcher):
 
     with pytest.raises(requests.HTTPError, match="Retry-After: 60"):
         searcher.search("x")
+
+
+# Recorded 2026-10-19 from /api/v1/papers?q=lunar water ice (abstracts trimmed).
+DOI_HEADER_RECORD = {
+    "abstract": "Obtaining accurate lunar water-hydrogen distribution maps holds significant scientific value...",
+    "abstract_source": "source",
+    "authors": ["MAO Xiaoli<sup>1</sup> ZHU Xuebo<sup>1</sup> MA Tao<sup>2†</sup>"],
+    "date": "2025-02-12",
+    "has_pdf": True,
+    "id": "chinaxiv-202502.00160",
+    "publication": None,
+    "source": "chinaxiv",
+    "source_language": "zh",
+    "source_url": "https://chinaxiv.org/abs/202502.00160",
+    "subjects": [],
+    "title": "doi: 10.15940/j.cnki.0001-5245.2025.01.004",
+}
+ISSN_HEADER_RECORD = {
+    "abstract": "Since the 20th century, lunar exploration has emerged as a significant undertaking...",
+    "abstract_source": "source",
+    "authors": ["Xiao Yuan<sup>1,2,3</sup>, Ding Chunyu<sup>1,2,3</sup>"],
+    "date": "2017-10-11",
+    "has_pdf": True,
+    "id": "chinaxiv-201711.01169",
+    "publication": None,
+    "source": "chinaxiv",
+    "source_language": "zh",
+    "source_url": "https://chinaxiv.org/abs/201711.01169",
+    "subjects": [],
+    "title": "CN 53-1189/P ISSN 1672-7673",
+}
+
+
+def test_journal_header_titles_are_dropped_and_flagged(searcher):
+    searcher.session.get = MagicMock(return_value=_response(
+        {"data": [DOI_HEADER_RECORD, ISSN_HEADER_RECORD, RECORD], "next_cursor": None}
+    ))
+
+    doi_paper, issn_paper, good = searcher.search("lunar water ice")
+
+    assert doi_paper.title == ""
+    assert doi_paper.doi == "10.15940/j.cnki.0001-5245.2025.01.004"
+    assert doi_paper.extra["title_unreliable"] is True
+    assert issn_paper.title == ""
+    assert issn_paper.doi == ""
+    assert issn_paper.extra["title_unreliable"] is True
+    assert good.title.startswith("Nonlinear Modal Analysis")
+    assert "title_unreliable" not in good.extra
+
+
+def test_citation_line_title_is_flagged(searcher):
+    paper = searcher._parse(dict(RECORD, title="Acta Astronomica Sinica, 2025, 66(1): 4"))
+    assert paper.title == ""
+    assert paper.extra["title_unreliable"] is True
+
+    paper = searcher._parse(dict(RECORD, title="Water Ice at the Lunar Poles: a 2025 Review of LRO Data"))
+    assert paper.title.startswith("Water Ice")

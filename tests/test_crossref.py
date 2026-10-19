@@ -202,3 +202,41 @@ def test_search_genuine_empty_is_empty():
     searcher = CrossRefSearcher()
     searcher.session.get = Mock(return_value=_reply(json_data={"message": {"items": []}}))
     assert searcher.search("graphs") == []
+
+
+# --- JATS abstracts and missing dates (#18) ----------------------------------
+# Trimmed from a recorded api.crossref.org/works reply.
+_JATS_ITEM = {
+    "DOI": "10.1000/jats",
+    "type": "journal-article",
+    "title": ["Water splitting"],
+    "abstract": (
+        "<jats:title>Abstract</jats:title>\n"
+        "<jats:p>We split H<jats:sub>2</jats:sub>O with <jats:italic>in situ</jats:italic> "
+        "catalysts, R&amp;amp;D &amp; 5 &lt; 6.</jats:p><jats:p>Second   paragraph.</jats:p>"
+    ),
+    "published": {"date-parts": [[2021, 3, 4]]},
+}
+
+
+def test_search_strips_jats_markup_from_abstract():
+    searcher = CrossRefSearcher()
+    searcher.session.get = Mock(return_value=_reply(json_data={"message": {"items": [_JATS_ITEM]}}))
+    [paper] = searcher.search("water")
+    assert paper.abstract == (
+        "Abstract We split H2O with in situ catalysts, R&amp;D & 5 < 6. Second paragraph."
+    )
+
+
+def test_search_item_without_date_has_no_published_date():
+    item = {
+        "DOI": "10.1000/nodate",
+        "type": "journal-article",
+        "title": ["Undated"],
+        "published": {"date-parts": [[None]]},
+        "issued": {"date-parts": [[None]]},
+    }
+    searcher = CrossRefSearcher()
+    searcher.session.get = Mock(return_value=_reply(json_data={"message": {"items": [item]}}))
+    [paper] = searcher.search("undated")
+    assert paper.published_date is None
