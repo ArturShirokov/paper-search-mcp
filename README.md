@@ -107,7 +107,7 @@ This matrix reflects **verified live-integration results** from functional and e
 | PMC | ✅ | ✅ (OA only) | ✅ (OA only) | OA PDFs only; direct download may be blocked by some proxy environments |
 | CORE | ✅ | ✅ (record-dependent) | ✅ (record-dependent) | Free key recommended; connector retries with backoff and falls back to key-less on 401/403 |
 | Europe PMC | ✅ | ✅ (OA) | ✅ (OA) | OA PDFs only; direct download may be blocked by some proxy environments |
-| dblp | ✅ | ❌ | ⚠️ info-only | Open API; reliable |
+| dblp | ⚠️ | ❌ | ⚠️ info-only | API is behind a bot wall (Anubis proof-of-work); the `all` preset lists it under `skipped`, name `dblp` explicitly to try it |
 | OpenAIRE | ✅ | ❌ | ❌ | Open API; retries 3× with escalating request profiles on transient 403 |
 | CiteSeerX | ⚠️ | ✅ (record-dependent) | ⚠️ | API endpoint intermittently unavailable / redirects to web archive |
 | DOAJ | ✅ | ⚠️ (URL-dependent) | ⚠️ (URL-dependent) | PDF availability varies by article; free key raises rate limits |

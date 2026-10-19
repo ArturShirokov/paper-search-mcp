@@ -48,6 +48,7 @@ from .academic_platforms.unpaywall import UnpaywallResolver, UnpaywallSearcher
 from .academic_platforms.zenodo import ZenodoSearcher
 from .config import get_env, load_env_file
 from .search_cache import SearchCache, search_key
+from .source_skips import skipped_under_all
 
 # Initialize MCP server
 mcp = FastMCP("paper_search_server")
@@ -605,22 +606,19 @@ async def search_papers(
         year: Optional year filter for Semantic Scholar only.
     Returns:
         Aggregated dictionary with per-source stats, errors, skipped sources
-        (bioRxiv/medRxiv under 'all' when the query isn't a category, DOI or
-        date range), and deduplicated papers.
+        (under 'all': dblp, behind a bot wall; bioRxiv/medRxiv when the query
+        isn't a category, DOI or date range), and deduplicated papers.
     """
     selected_sources = _parse_sources(sources)
     invalid_sources = _invalid_sources(sources)
     errors: Dict[str, str] = {
         source: "Unknown or unavailable source." for source in invalid_sources
     }
-    # Category-only sources would error on every keyword query under "all";
-    # report them as skipped. Naming them explicitly still surfaces the error.
+    # Under "all", report sources that can't answer as skipped instead of
+    # erroring. Naming them explicitly still surfaces the error.
     skipped: Dict[str, str] = {}
     if not sources or sources.strip().lower() == "all":
-        for name, searcher in (("biorxiv", biorxiv_searcher), ("medrxiv", medrxiv_searcher)):
-            reason = searcher.skip_reason(query)
-            if reason and name in selected_sources:
-                skipped[name] = reason
+        skipped = skipped_under_all(query, selected_sources)
         selected_sources = [source for source in selected_sources if source not in skipped]
 
     if not selected_sources:

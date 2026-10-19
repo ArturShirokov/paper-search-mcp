@@ -47,10 +47,11 @@ def test_command_respects_sources(arguments, expected, query, monkeypatch, capsy
     assert asyncio.run(cli.cmd_search(args)) == 0
     output = json.loads(capsys.readouterr().out)
     fields = {"query", "sources_used", "source_results", "errors", "total", "papers"}
-    if expected is cli.ALL_SOURCES and query == "machine learning":
-        # bioRxiv/medRxiv have no keyword search, so "all" skips them.
-        expected = [source for source in expected if source not in ("biorxiv", "medrxiv")]
-        assert set(output.pop("skipped")) == {"biorxiv", "medrxiv"}
+    if expected is cli.ALL_SOURCES:
+        # dblp is behind a bot wall; bioRxiv/medRxiv have no keyword search.
+        dropped = {"dblp", "biorxiv", "medrxiv"} if query == "machine learning" else {"dblp"}
+        expected = [source for source in expected if source not in dropped]
+        assert set(output.pop("skipped")) == dropped
     assert output["sources_used"] == expected
     assert list(searchers) == expected
     assert output["source_results"] == dict.fromkeys(expected, 0)

@@ -138,5 +138,28 @@ class TestUnifiedSearchSkipsCategoryOnlySources(unittest.TestCase):
         biorxiv.assert_awaited_once()
 
 
+class TestUnifiedSearchSkipsBlockedSources(unittest.TestCase):
+    def _search(self, sources):
+        dblp = AsyncMock(return_value=[])
+        with (
+            patch.object(server, "ALL_SOURCES", ["arxiv", "dblp"]),
+            patch.object(server, "search_arxiv", new=AsyncMock(return_value=[])),
+            patch.object(server, "search_dblp", new=dblp),
+        ):
+            return asyncio.run(server.search_papers("10.1038/x", sources=sources)), dblp
+
+    def test_all_skips_dblp(self):
+        result, dblp = self._search("all")
+        self.assertEqual(result["sources_used"], ["arxiv"])
+        self.assertIn("bot wall", result["skipped"]["dblp"])
+        dblp.assert_not_called()
+
+    def test_explicit_dblp_still_runs(self):
+        result, dblp = self._search("dblp")
+        self.assertEqual(result["sources_used"], ["dblp"])
+        self.assertNotIn("skipped", result)
+        dblp.assert_awaited_once()
+
+
 if __name__ == "__main__":
     unittest.main()

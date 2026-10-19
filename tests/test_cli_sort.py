@@ -159,3 +159,21 @@ def test_cmd_search_explicit_category_only_source_still_runs(monkeypatch, capsys
     assert asyncio.run(cli.cmd_search(args)) == 0
     assert "skipped" not in json.loads(capsys.readouterr().out)
     searchers["biorxiv"].search.assert_called_once()
+
+
+def test_cmd_search_all_skips_blocked_dblp(monkeypatch, capsys):
+    searchers = install_searchers(monkeypatch, {"arxiv": [], "dblp": []})
+    args = cli.build_parser().parse_args(["search", "10.1038/s41593-020-0658-y"])
+    assert asyncio.run(cli.cmd_search(args)) == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["sources_used"] == ["arxiv"]
+    assert "bot wall" in output["skipped"]["dblp"]
+    searchers["dblp"].search.assert_not_called()
+
+
+def test_cmd_search_explicit_dblp_still_runs(monkeypatch, capsys):
+    searchers = install_searchers(monkeypatch, {"dblp": []})
+    args = cli.build_parser().parse_args(["search", "q", "-s", "dblp"])
+    assert asyncio.run(cli.cmd_search(args)) == 0
+    assert "skipped" not in json.loads(capsys.readouterr().out)
+    searchers["dblp"].search.assert_called_once()
