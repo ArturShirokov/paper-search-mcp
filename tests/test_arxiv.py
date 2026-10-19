@@ -1,8 +1,11 @@
 # tests/test_arxiv.py
+import multiprocessing
+import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from threading import Lock
-from time import sleep
+from pathlib import Path
+from time import sleep, time
 from unittest.mock import Mock, patch
 
 import requests
@@ -21,6 +24,45 @@ def response_with(content: bytes, status_code: int = 200):
     response.status_code = status_code
     response.headers = {}
     return response
+
+
+def _pace_in_child(rate_file):
+    ArxivSearcher.MIN_INTERVAL_SEC = 0.5
+    ArxivSearcher.RATE_FILE = Path(rate_file)
+    stamps = []
+    for _ in range(3):
+        ArxivSearcher._pace_locked()
+        stamps.append(time())
+    return stamps
+
+
+class TestArxivCrossProcessRateLimit(unittest.TestCase):
+    def test_two_processes_are_spaced_by_min_interval(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            rate_file = str(Path(tmp) / "sub" / "arxiv-rate")
+            with multiprocessing.get_context("spawn").Pool(2) as pool:
+                results = pool.map(_pace_in_child, [rate_file, rate_file])
+
+        stamps = sorted(s for child in results for s in child)
+        gaps = [b - a for a, b in zip(stamps, stamps[1:])]
+        self.assertGreaterEqual(min(gaps), 0.45)
+
+    def test_unwritable_cache_falls_back_to_in_process_spacing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            blocker = Path(tmp) / "file"
+            blocker.write_text("")
+            with (
+                patch.object(ArxivSearcher, "RATE_FILE", blocker / "arxiv-rate"),
+                patch.object(ArxivSearcher, "_last_request_at", 10.0),
+                patch(
+                    "paper_search_mcp.academic_platforms.arxiv.time.monotonic",
+                    side_effect=[11.0, 13.0],
+                ),
+                patch("paper_search_mcp.academic_platforms.arxiv.time.sleep") as wait,
+            ):
+                ArxivSearcher._pace_locked()
+
+        wait.assert_called_once_with(2.0)
 
 
 class TestArxivRateLimiting(unittest.TestCase):
@@ -124,21 +166,6 @@ class TestArxivRateLimiting(unittest.TestCase):
                 raise AssertionError("response.text must not be accessed")
 
         self.assertTrue(ArxivSearcher._is_soft_rate_limit(ContentOnlyResponse()))
-
-    def test_pacing_uses_shared_timestamp(self):
-        ArxivSearcher._last_request_at = 10.0
-
-        with (
-            patch(
-                "paper_search_mcp.academic_platforms.arxiv.time.monotonic",
-                side_effect=[11.0, 13.0],
-            ),
-            patch("paper_search_mcp.academic_platforms.arxiv.time.sleep") as wait,
-        ):
-            ArxivSearcher._pace_locked()
-
-        wait.assert_called_once_with(2.0)
-        self.assertEqual(ArxivSearcher._last_request_at, 13.0)
 
     def test_requests_from_different_instances_are_serialized(self):
         state_lock = Lock()

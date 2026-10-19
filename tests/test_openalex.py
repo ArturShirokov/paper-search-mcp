@@ -1,9 +1,13 @@
 import asyncio
+import io
 import os
+import tempfile
 import unittest
 
 import requests
 from unittest.mock import AsyncMock, Mock, patch
+from pypdf import PdfWriter
+from pypdf.generic import DictionaryObject, NameObject, DecodedStreamObject
 
 from paper_search_mcp import server
 from paper_search_mcp.academic_platforms.openalex import OpenAlexSearcher
@@ -157,6 +161,122 @@ class TestOpenAlexSearcher(unittest.TestCase):
         user_agent = self.searcher.session.headers.get("User-Agent", "")
         self.assertIn("paper-search-mcp", user_agent)
         self.assertIn("mailto:", user_agent)
+
+
+# Trimmed from api.openalex.org/works/W7213893935 as fetched on 2026-10-19.
+TITLE = "A comprehensive review of machine learning and deep learning approaches for fungal classification in plants"
+PDF_URL = "https://horizonepublishing.com/journals/index.php/PST/article/download/11225/16175"
+WORK = {
+    "id": "https://openalex.org/W7213893935",
+    "doi": "https://doi.org/10.14719/pst.11225",
+    "display_name": TITLE,
+    "best_oa_location": {
+        "is_oa": True,
+        "landing_page_url": "https://doi.org/10.14719/pst.11225",
+        "pdf_url": PDF_URL,
+    },
+    "locations": [
+        {"is_oa": True, "landing_page_url": "https://doi.org/10.14719/pst.11225", "pdf_url": PDF_URL},
+        {"is_oa": True, "landing_page_url": "https://horizonepublishing.com/journals/index.php/PST/article/view/11225", "pdf_url": None},
+    ],
+}
+
+
+def _pdf(text):
+    writer = PdfWriter()
+    page = writer.add_blank_page(612, 792)
+    font = DictionaryObject({NameObject("/Type"): NameObject("/Font"),
+                             NameObject("/Subtype"): NameObject("/Type1"),
+                             NameObject("/BaseFont"): NameObject("/Helvetica")})
+    page[NameObject("/Resources")] = DictionaryObject({NameObject("/Font"): DictionaryObject({NameObject("/F1"): font})})
+    stream = DecodedStreamObject()
+    stream.set_data(f"BT /F1 8 Tf 20 700 Td ({text}) Tj ET".encode())
+    page[NameObject("/Contents")] = writer._add_object(stream)
+    buffer = io.BytesIO()
+    writer.write(buffer)
+    return buffer.getvalue()
+
+
+def _reply(json_data=None, body=b"", status=200):
+    response = Mock(status_code=status, headers={})
+    response.json.return_value = json_data
+    response.iter_content.return_value = iter([body])
+    return response
+
+
+class TestOpenAlexDownload(unittest.TestCase):
+    def setUp(self):
+        self.searcher = OpenAlexSearcher(api_key="secret-key")
+        self.tmp = tempfile.mkdtemp()
+
+    def _serve(self, work=WORK, pdf_body=None):
+        def get(url, **kwargs):
+            if url.startswith(OpenAlexSearcher.BASE_URL):
+                return _reply(work)
+            return _reply(body=_pdf(TITLE) if pdf_body is None else pdf_body)
+        self.searcher.session.get = Mock(side_effect=get)
+
+    def test_download_by_work_id_saves_best_oa_pdf(self):
+        self._serve()
+        path = self.searcher.download_pdf("W7213893935", self.tmp)
+        self.assertEqual(os.path.basename(path), "openalex_W7213893935.pdf")
+        with open(path, "rb") as f:
+            self.assertTrue(f.read().startswith(b"%PDF-"))
+        lookup, pdf = self.searcher.session.get.call_args_list
+        self.assertEqual(lookup.args[0], OpenAlexSearcher.BASE_URL + "/W7213893935")
+        self.assertEqual(pdf.args[0], PDF_URL)
+        # The OpenAlex API key must not go to the publisher's host.
+        self.assertIsNone(pdf.kwargs["headers"]["Authorization"])
+
+    def test_download_accepts_doi(self):
+        self._serve()
+        path = self.searcher.download_pdf("https://doi.org/10.14719/PST.11225", self.tmp)
+        self.assertEqual(os.path.basename(path), "openalex_W7213893935.pdf")
+        lookup = self.searcher.session.get.call_args_list[0]
+        self.assertEqual(lookup.args[0], OpenAlexSearcher.BASE_URL + "/doi:10.14719/pst.11225")
+
+    def test_html_reply_is_rejected_and_next_location_tried(self):
+        mirror = "https://mirror.example.org/paper.pdf"
+        work = {**WORK, "locations": WORK["locations"] + [{"pdf_url": mirror}]}
+        html = b"<!doctype html><html><body>Article landing page</body></html>"
+
+        def get(url, **kwargs):
+            if url.startswith(OpenAlexSearcher.BASE_URL):
+                return _reply(work)
+            return _reply(body=html if url == PDF_URL else _pdf(TITLE))
+        self.searcher.session.get = Mock(side_effect=get)
+
+        path = self.searcher.download_pdf("W7213893935", self.tmp)
+        with open(path, "rb") as f:
+            self.assertTrue(f.read().startswith(b"%PDF-"))
+        self.assertEqual(self.searcher.session.get.call_args_list[-1].args[0], mirror)
+
+    def test_html_only_raises_and_saves_nothing(self):
+        self._serve(pdf_body=b"<html><body>Please log in</body></html>")
+        with self.assertRaisesRegex(ValueError, "W7213893935.*not a complete PDF"):
+            self.searcher.download_pdf("W7213893935", self.tmp)
+        self.assertEqual(os.listdir(self.tmp), [])
+
+    def test_work_without_oa_pdf_raises_naming_the_work(self):
+        work = {**WORK, "best_oa_location": None,
+                "locations": [{"is_oa": False, "landing_page_url": "https://x.org", "pdf_url": None}]}
+        self._serve(work=work)
+        with self.assertRaisesRegex(ValueError, "W7213893935.*no open-access PDF"):
+            self.searcher.download_pdf("W7213893935", self.tmp)
+        self.assertEqual(len(self.searcher.session.get.call_args_list), 1)
+
+    def test_read_paper_returns_pdf_text(self):
+        self._serve()
+        text = self.searcher.read_paper("W7213893935", self.tmp)
+        self.assertIn("fungal classification in plants", text)
+
+    def test_tools_route_to_searcher(self):
+        self._serve()
+        with patch.object(server, "openalex_searcher", self.searcher):
+            path = asyncio.run(server.download_openalex("W7213893935", self.tmp))
+            text = asyncio.run(server.read_openalex_paper("W7213893935", self.tmp))
+        self.assertTrue(path.endswith("openalex_W7213893935.pdf"))
+        self.assertIn("machine learning", text)
 
 
 class TestSearchOpenAlexTool(unittest.TestCase):
