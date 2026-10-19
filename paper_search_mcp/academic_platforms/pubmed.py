@@ -19,6 +19,19 @@ def _xml_root(response, expected_tag: str) -> ET.Element:
         raise ValueError(f"PubMed returned an unexpected reply (<{root.tag}>)")
     return root
 
+
+def _parse_date(elem):
+    """Year/Month/Day of a PubDate or ArticleDate; Month may be '10' or 'Oct'."""
+    if elem is None:
+        return None
+    year, month, day = (elem.findtext(tag, '').strip() for tag in ('Year', 'Month', 'Day'))
+    try:
+        if not month.isdigit():
+            month = datetime.strptime(month[:3], '%b').month if month else 1
+        return datetime(int(year), int(month), int(day or 1))
+    except ValueError:
+        return None
+
 class PubMedSearcher(PaperSource):
     """Searcher for PubMed papers"""
     SEARCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
@@ -85,9 +98,8 @@ class PubMedSearcher(PaperSource):
                         abstract_parts.append(text)
                 abstract = ' '.join(abstract_parts)
 
-                year_elem = article.find('.//PubDate/Year')
-                pub_date = year_elem.text if year_elem is not None else None
-                published = datetime.strptime(pub_date, '%Y') if pub_date else None
+                published = (_parse_date(article.find('.//ArticleDate'))
+                             or _parse_date(article.find('.//PubDate')))
                 doi_elem = article.find('.//ELocationID[@EIdType="doi"]')
                 doi = doi_elem.text if doi_elem is not None else ''
 
