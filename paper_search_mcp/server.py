@@ -2075,26 +2075,26 @@ async def download_ssrn(paper_id: str, save_path: str = "./downloads") -> str:
 
 @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
 async def read_openalex_paper(paper_id: str, save_path: str = "./downloads") -> str:
-    """Attempt to read and extract text content from an OpenAlex paper.
+    """Read the text of an OpenAlex work's open-access PDF.
 
     Args:
-        paper_id: OpenAlex paper ID.
+        paper_id: OpenAlex work ID (e.g. 'W7213893935') or DOI.
         save_path: Directory where the PDF is/will be saved (default: './downloads').
     Returns:
-        str: Message indicating that direct paper reading is not supported natively.
+        str: Extracted text. Raises when the work has no downloadable open-access PDF.
     """
     return openalex_searcher.read_paper(paper_id, save_path)
 
 
 @mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": True, "openWorldHint": True})
 async def download_openalex(paper_id: str, save_path: str = "./downloads") -> str:
-    """Download PDF for a paper from OpenAlex.
+    """Download an OpenAlex work's open-access PDF (best location first).
 
     Args:
-        paper_id: OpenAlex paper ID.
+        paper_id: OpenAlex work ID (e.g. 'W7213893935') or DOI.
         save_path: Directory to save the PDF (default: './downloads').
     Returns:
-        str: Error message, typically OpenAlex relies on extracted pdf_url instead of direct downloads.
+        str: Path to the saved PDF. Raises when no location yields a PDF of this work.
     """
     return await asyncio.to_thread(openalex_searcher.download_pdf, paper_id, save_path)
 
