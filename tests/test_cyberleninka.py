@@ -66,7 +66,8 @@ def test_search_parses_api_results(searcher):
     papers = searcher.search("квантовые вычисления", max_results=3)
 
     payload = searcher.session.post.call_args.kwargs["json"]
-    assert payload == {"mode": "articles", "q": "квантовые вычисления", "size": 3, "from": 0}
+    # The site ORs the words, so fetch a full page before filtering.
+    assert payload == {"mode": "articles", "q": "квантовые вычисления", "size": 100, "from": 0}
     [paper] = papers
     assert paper.source == "cyberleninka"
     assert paper.paper_id == "kvantovaya-kriptografiya"
@@ -77,6 +78,56 @@ def test_search_parses_api_results(searcher):
     assert paper.pdf_url == paper.url + "/pdf"
     assert paper.published_date == datetime(2025, 1, 1)
     assert paper.extra["journal"] == "Вестник Пензенского государственного университета"
+
+
+# Recorded from a live "водяной лёд Луна" search on 2026-10-13 (trimmed).
+WATER_ICE_JSON = {
+    "found": 8,
+    "articles": [
+        {
+            "name": "Шмели в <b>дуплянках</b>",
+            "annotation": "Наблюдения за заселением искусственных гнездовий.",
+            "link": "/article/n/shmeli-v-duplyankah",
+            "authors": ["Иванов И. И."],
+            "year": 2019,
+        },
+        {
+            "name": "Извлечение воды из грунта космических тел",
+            "annotation": "Оценка запасов <b>водяного</b> <b>льда</b> в реголите <b>Луны</b>.",
+            "link": "/article/n/izvlechenie-vody",
+            "authors": ["Петров П. П."],
+            "year": 2021,
+        },
+        {
+            "name": "<b>Луна</b> и миграция птиц",
+            "annotation": "Связь фаз <b>Луны</b> с перелётом.",
+            "link": "/article/n/luna-i-migratsiya",
+            "authors": [],
+            "year": 2020,
+        },
+    ],
+}
+
+
+def test_search_keeps_only_hits_with_every_query_word(searcher):
+    searcher.session.post = MagicMock(return_value=_response(WATER_ICE_JSON))
+
+    papers = searcher.search("водяной лёд Луна")
+
+    # "лёд" finds "льда", and "ё" folds to "е".
+    assert [p.paper_id for p in papers] == ["izvlechenie-vody"]
+
+
+def test_search_returns_empty_when_no_hit_has_every_word(searcher):
+    searcher.session.post = MagicMock(return_value=_response(WATER_ICE_JSON))
+
+    assert searcher.search("водяной лёд Марс") == []
+
+
+def test_search_caps_filtered_hits_at_max_results(searcher):
+    searcher.session.post = MagicMock(return_value=_response(WATER_ICE_JSON))
+
+    assert [p.paper_id for p in searcher.search("Луна", max_results=1)] == ["izvlechenie-vody"]
 
 
 def test_search_raises_on_http_error(searcher):
@@ -168,7 +219,7 @@ def test_search_tolerates_bad_year_and_trailing_slash(searcher):
     bad = dict(SEARCH_JSON["articles"][0], year="н.д.", link="/article/n/odd/")
     searcher.session.post = MagicMock(return_value=_response({"articles": [bad]}))
 
-    [paper] = searcher.search("q")
+    [paper] = searcher.search("квантовые")
 
     assert paper.published_date is None
     assert paper.url == "https://cyberleninka.ru/article/n/odd"
