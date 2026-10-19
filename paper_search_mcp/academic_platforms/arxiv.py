@@ -42,7 +42,10 @@ class ArxivSearcher(PaperSource):
     RETRYABLE_STATUS_CODES = frozenset((429, 500, 502, 503, 504))
     _request_lock = Lock()
     _last_request_at = 0.0
-    RATE_FILE = Path.home() / ".cache" / "paper-search-mcp" / "arxiv-rate"
+    RATE_FILE = (
+        Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
+        / "paper-search-mcp" / "arxiv-rate"
+    )
     _FIELD_PREFIX_RE = re.compile(
         r"(?:^|\s)(ti|au|abs|co|jr|cat|rn|id|all|submittedDate|lastUpdatedDate):",
         re.IGNORECASE,
