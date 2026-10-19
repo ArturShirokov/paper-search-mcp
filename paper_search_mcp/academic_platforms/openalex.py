@@ -2,8 +2,10 @@ from typing import List
 from datetime import datetime
 import requests
 import logging
+from pathlib import Path
 from ..paper import Paper
 from .base import PaperSource, check_response, json_body, retry_hint
+from .public_pdf import read_pdf_text, save_verified_pdf
 from ..utils import extract_doi
 from ..config import get_env
 
@@ -346,23 +348,41 @@ class OpenAlexSearcher(PaperSource):
         from .openalex_relations import related_works
         return related_works(self, identifier, "cited_by", max_results, **options)
 
-    def download_pdf(self, paper_id: str, save_path: str) -> str:
+    def download_pdf(self, paper_id: str, save_path: str = "./downloads") -> str:
+        """Save the work's open-access PDF (best location first, then the rest).
+
+        Accepts an OpenAlex work ID or a DOI. Raises ValueError when no
+        location yields a readable PDF.
         """
-        OpenAlex does not host PDFs natively, it only links to open access versions.
-        """
-        raise NotImplementedError(
-            "OpenAlex does not provide direct PDF downloads natively. "
-            "Please use the extracted 'pdf_url' if available, or DOI for fallback."
+        from .openalex_relations import normalize_identifier
+        response = self.session.get(
+            f"{self.BASE_URL}/{normalize_identifier(paper_id)}", timeout=30
         )
+        check_response(response, "OpenAlex")
+        work = json_body(response, "OpenAlex")
+        work_id = _work_id(work.get("id"))
+        locations = [work.get("best_oa_location")] + (work.get("locations") or [])
+        urls = list(dict.fromkeys(
+            loc["pdf_url"] for loc in locations if loc and loc.get("pdf_url")
+        ))
+        reason = "no open-access PDF location"
+        for url in urls:
+            try:
+                # The OpenAlex API key must not go to the publisher's host.
+                pdf = self.session.get(
+                    url, headers={"Authorization": None}, timeout=60, stream=True
+                )
+                check_response(pdf, "PDF host")
+                # Real OA PDFs may lack the OpenAlex title as text (scans,
+                # translations), so only require a readable PDF.
+                return save_verified_pdf(pdf, Path(save_path) / f"openalex_{work_id}.pdf", None)
+            except (requests.RequestException, ValueError) as exc:
+                reason = str(exc)
+        raise ValueError(f"OpenAlex work {work_id or paper_id} has no downloadable PDF: {reason}")
 
     def read_paper(self, paper_id: str, save_path: str = "./downloads") -> str:
-        """
-        Not implemented for OpenAlex.
-        """
-        return (
-            "OpenAlex papers cannot be read directly through this aggregator. "
-            "Please use the paper's DOI or pdf_url to access the full text."
-        )
+        """Download the work's open-access PDF and return its text."""
+        return read_pdf_text(self.download_pdf(paper_id, save_path))
 
 
 if __name__ == "__main__":

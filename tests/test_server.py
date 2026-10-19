@@ -138,5 +138,75 @@ class TestUnifiedSearchSkipsCategoryOnlySources(unittest.TestCase):
         biorxiv.assert_awaited_once()
 
 
+
+class TestStrictAndNotes(unittest.TestCase):
+    PAPER = {"paper_id": "c1", "title": "Lunar water ice", "authors": "A", "doi": ""}
+
+    def _search(self, by_query, query="lunar water ice extraction"):
+        chinarxiv = AsyncMock(side_effect=lambda q, n: by_query.get(q, []))
+        with patch.object(server, "search_chinarxiv", new=chinarxiv):
+            result = asyncio.run(server.search_papers(query, sources="chinarxiv"))
+        return result, chinarxiv
+
+    def test_zero_result_query_names_shorter_query_that_matches(self):
+        result, _ = self._search({"lunar water ice": [self.PAPER]})
+        self.assertEqual(result["papers"], [])
+        self.assertEqual(result["errors"], {})
+        self.assertIn("'lunar water ice'", result["notes"]["chinarxiv"])
+
+    def test_zero_result_query_and_shorter_query_both_empty(self):
+        result, chinarxiv = self._search({})
+        self.assertEqual(chinarxiv.await_count, 2)
+        note = result["notes"]["chinarxiv"]
+        self.assertIn("every query word", note)
+        self.assertNotIn("'lunar water ice'", note)
+
+    def test_failed_retry_does_not_suggest_a_shorter_query(self):
+        def search(q, n):
+            if q != "lunar water ice extraction":
+                raise TimeoutError("timed out")
+            return []
+
+        chinarxiv = AsyncMock(side_effect=search)
+        with patch.object(server, "search_chinarxiv", new=chinarxiv):
+            result = asyncio.run(server.search_papers("lunar water ice extraction", sources="chinarxiv"))
+        note = result["notes"]["chinarxiv"]
+        self.assertIn("every query word", note)
+        self.assertNotIn("2-3 words", note)
+
+    def test_every_strict_and_source_has_a_search_tool(self):
+        from paper_search_mcp.strict_query import STRICT_AND_SOURCES
+        for source in STRICT_AND_SOURCES:
+            self.assertTrue(callable(getattr(server, f"search_{source}", None)), source)
+
+    def test_two_word_query_gets_no_retry_or_note(self):
+        result, chinarxiv = self._search({}, query="lunar ice")
+        self.assertEqual(chinarxiv.await_count, 1)
+        self.assertNotIn("notes", result)
+
+
+class TestUnifiedSearchSkipsBlockedSources(unittest.TestCase):
+    def _search(self, sources):
+        dblp = AsyncMock(return_value=[])
+        with (
+            patch.object(server, "ALL_SOURCES", ["arxiv", "dblp"]),
+            patch.object(server, "search_arxiv", new=AsyncMock(return_value=[])),
+            patch.object(server, "search_dblp", new=dblp),
+        ):
+            return asyncio.run(server.search_papers("10.1038/x", sources=sources)), dblp
+
+    def test_all_skips_dblp(self):
+        result, dblp = self._search("all")
+        self.assertEqual(result["sources_used"], ["arxiv"])
+        self.assertIn("bot wall", result["skipped"]["dblp"])
+        dblp.assert_not_called()
+
+    def test_explicit_dblp_still_runs(self):
+        result, dblp = self._search("dblp")
+        self.assertEqual(result["sources_used"], ["dblp"])
+        self.assertNotIn("skipped", result)
+        dblp.assert_awaited_once()
+
+
 if __name__ == "__main__":
     unittest.main()

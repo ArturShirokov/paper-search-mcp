@@ -1,6 +1,8 @@
 # paper_search_mcp/academic_platforms/crossref.py
 from typing import List, Optional, Dict, Any
 from datetime import datetime
+import html
+import re
 import requests
 import time
 from ..paper import Paper
@@ -8,6 +10,17 @@ from .base import PaperSource, check_response, json_body
 import logging
 
 logger = logging.getLogger(__name__)
+
+# Block JATS elements become a space so paragraphs don't run together;
+# inline ones (italic, sub, sup) vanish so "H<sub>2</sub>O" stays "H2O".
+_BLOCK_TAG_RE = re.compile(r"</?(?:jats:)?(?:p|title|sec|list-item)\b[^>]*>")
+_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def _clean_abstract(text: str) -> str:
+    """Strip JATS/XML tags, unescape entities once, collapse whitespace."""
+    text = _TAG_RE.sub("", _BLOCK_TAG_RE.sub(" ", text or ""))
+    return " ".join(html.unescape(text).split())
 
 class CrossRefSearcher(PaperSource):
     """Searcher for CrossRef database papers"""
@@ -116,7 +129,7 @@ class CrossRefSearcher(PaperSource):
             doi = item.get('DOI', '')
             title = self._extract_title(item)
             authors = self._extract_authors(item)
-            abstract = item.get('abstract', '')
+            abstract = _clean_abstract(item.get('abstract', ''))
             
             # Extract publication date
             published_date = self._extract_date(item, 'published')
@@ -124,10 +137,6 @@ class CrossRefSearcher(PaperSource):
                 published_date = self._extract_date(item, 'issued')
             if not published_date:
                 published_date = self._extract_date(item, 'created')
-            
-            # Default to epoch if no date found
-            if not published_date:
-                published_date = datetime(1970, 1, 1)
             
             # Extract URLs
             url = item.get('URL', f"https://doi.org/{doi}" if doi else '')
@@ -217,7 +226,9 @@ class CrossRefSearcher(PaperSource):
             
         parts = date_parts[0]
         try:
-            year = parts[0] if len(parts) > 0 and parts[0] is not None else 1970
+            year = parts[0]
+            if year is None:
+                return None
             month = parts[1] if len(parts) > 1 and parts[1] is not None else 1
             day = parts[2] if len(parts) > 2 and parts[2] is not None else 1
             return datetime(year, month, day)
@@ -333,7 +344,7 @@ if __name__ == "__main__":
         for i, paper in enumerate(papers, 1):
             print(f"{i}. {paper.title} (DOI: {paper.doi})")
             print(f"   Authors: {', '.join(paper.authors[:3])}{'...' if len(paper.authors) > 3 else ''}")
-            print(f"   Published: {paper.published_date.year}")
+            print(f"   Published: {paper.published_date.year if paper.published_date else 'N/A'}")
             print(f"   Citations: {paper.citations}")
             publisher = paper.extra.get('publisher', 'N/A') if paper.extra else 'N/A'
             print(f"   Publisher: {publisher}")

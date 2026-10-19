@@ -143,18 +143,13 @@ class EuropePMCSearcher(PaperSource):
 
             # Extract publication date
             pub_date = None
-            pub_year = item.get('pubYear')
-            pub_month = item.get('pubMonth', '1')
-            pub_day = item.get('pubDay', '1')
-            if pub_year:
+            for value, fmt in ((item.get('firstPublicationDate'), '%Y-%m-%d'),
+                               (item.get('pubYear'), '%Y')):
                 try:
-                    date_str = f"{pub_year}-{str(pub_month).zfill(2)}-{str(pub_day).zfill(2)}"
-                    pub_date = datetime.strptime(date_str, '%Y-%m-%d')
-                except ValueError:
-                    try:
-                        pub_date = datetime.strptime(pub_year, '%Y')
-                    except ValueError:
-                        pass
+                    pub_date = datetime.strptime(value, fmt)
+                    break
+                except (TypeError, ValueError):
+                    continue
 
             # Extract URLs
             url = item.get('fullTextUrlList', {}).get('fullTextUrl', [])

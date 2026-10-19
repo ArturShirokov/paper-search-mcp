@@ -16,7 +16,9 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from .config import get_env
+from .source_skips import skipped_under_all
 from .tool_cli import cmd_tool
+from .strict_query import strict_and_notes
 from .academic_platforms.arxiv import ArxivSearcher
 from .academic_platforms.pubmed import PubMedSearcher
 from .academic_platforms.biorxiv import BioRxivSearcher
@@ -241,13 +243,10 @@ async def cmd_search(args: argparse.Namespace) -> int:
         print(json.dumps({"error": "No valid sources selected", "available": sorted(_available_sources())}))
         return 1
 
-    # Mirrors search_papers: under "all", skip category-only sources for keyword queries.
+    # Mirrors search_papers: under "all", skip sources that can't answer.
     skipped: Dict[str, str] = {}
     if (args.sources or "all").strip().lower() == "all":
-        for name, searcher_cls in (("biorxiv", BioRxivSearcher), ("medrxiv", MedRxivSearcher)):
-            reason = searcher_cls.skip_reason(args.query)
-            if reason and name in selected:
-                skipped[name] = reason
+        skipped = skipped_under_all(args.query, selected)
         selected = [src for src in selected if src not in skipped]
 
     tasks = {}
@@ -296,6 +295,15 @@ async def cmd_search(args: argparse.Namespace) -> int:
 
     deduped = _sort_papers(_dedupe(merged), getattr(args, "sort", "relevance"))
 
+    async def retry(src: str, shorter: str) -> List[Dict]:
+        if source_timeout is None:
+            return await _async_search(_get_searcher(src), shorter, args.max_results)
+        from .cli_search import search_sources
+        job = {"source": src, "query": shorter, "max_results": args.max_results, "kwargs": {}}
+        return (await search_sources([job], source_timeout))[0]
+
+    notes = await strict_and_notes(args.query, source_counts, errors, retry)
+
     output = {
         "query": args.query,
         "sources_used": names,
@@ -306,6 +314,8 @@ async def cmd_search(args: argparse.Namespace) -> int:
     }
     if skipped:
         output["skipped"] = skipped
+    if notes:
+        output["notes"] = notes
     print(json.dumps(output, indent=2, default=str))
     return 0
 

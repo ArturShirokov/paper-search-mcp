@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 import tempfile
 import unicodedata
+from typing import Optional
 
 from pypdf import PdfReader
 
@@ -17,8 +18,10 @@ def _normalize(text: str) -> str:
     return re.sub(r"[^\w]", "", unicodedata.normalize("NFKC", text).casefold())
 
 
-def save_verified_pdf(response, output: Path, expected_title: str) -> str:
+def save_verified_pdf(response, output: Path, expected_title: Optional[str]) -> str:
     """Save atomically only after parsing and matching the title on page one.
+
+    ``expected_title=None`` skips the title match (the file must still parse).
 
     MIME alone never establishes that a response is a PDF. Image-only, corrupt,
     wrong-paper and over-50-MiB files are rejected without replacing a good file.
@@ -36,9 +39,10 @@ def save_verified_pdf(response, output: Path, expected_title: str) -> str:
         text = reader.pages[0].extract_text() if reader.pages else ""
     except Exception:
         raise ValueError("Public download is not a readable PDF") from None
-    title = _normalize(expected_title)
-    if not title or title not in _normalize((text or "")[:12000]):
-        raise ValueError("PDF identity could not be verified against the paper title")
+    if expected_title is not None:
+        title = _normalize(expected_title)
+        if not title or title not in _normalize((text or "")[:12000]):
+            raise ValueError("PDF identity could not be verified against the paper title")
     output.parent.mkdir(parents=True, exist_ok=True)
     temporary = None
     try:

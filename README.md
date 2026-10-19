@@ -103,15 +103,15 @@ This matrix reflects **verified live-integration results** from functional and e
 | IACR | ✅ | ✅ | ✅ | Open API; reliable |
 | Semantic Scholar | ✅ | ✅ (OA) | ✅ (OA) | Works without key (rate-limited); key improves limits; key rejection (403) retried automatically without key |
 | Crossref | ✅ | ❌ | ⚠️ info-only | Open API; reliable |
-| OpenAlex | ✅ | ❌ | ⚠️ info-only | Keyless budget is about 100 searches/day (1,000 credits, 10 per search); set `PAPER_SEARCH_MCP_OPENALEX_API_KEY` (free) for more |
+| OpenAlex | ✅ | ✅ (OA PDF links) | ✅ (OA PDF links) | Downloads the work's open-access PDF location; HTML and landing pages are rejected, but the title is not checked (scans and translations lack it). Keyless budget is about 100 searches/day (1,000 credits, 10 per search); set `PAPER_SEARCH_MCP_OPENALEX_API_KEY` (free) for more |
 | PMC | ✅ | ✅ (OA only) | ✅ (OA only) | OA PDFs only; direct download may be blocked by some proxy environments |
 | CORE | ✅ | ✅ (record-dependent) | ✅ (record-dependent) | Free key recommended; connector retries with backoff and falls back to key-less on 401/403 |
 | Europe PMC | ✅ | ✅ (OA) | ✅ (OA) | OA PDFs only; direct download may be blocked by some proxy environments |
-| dblp | ✅ | ❌ | ⚠️ info-only | Open API; reliable |
+| dblp | ⚠️ | ❌ | ⚠️ info-only | API is behind a bot wall (Anubis proof-of-work); the `all` preset lists it under `skipped`, name `dblp` explicitly to try it |
 | OpenAIRE | ✅ | ❌ | ❌ | Open API; retries 3× with escalating request profiles on transient 403 |
-| CiteSeerX | ⚠️ | ✅ (record-dependent) | ⚠️ | API endpoint intermittently unavailable / redirects to web archive |
+| CiteSeerX | ❌ | ✅ (record-dependent) | ⚠️ | Offline: the service is retired and redirects to the Wayback Machine; the `all` preset lists it under `skipped`, name `citeseerx` explicitly to try it |
 | DOAJ | ✅ | ⚠️ (URL-dependent) | ⚠️ (URL-dependent) | PDF availability varies by article; free key raises rate limits |
-| BASE | ⚠️ | ✅ (record-dependent) | ✅ (record-dependent) | OAI-PMH endpoint requires institutional IP registration; unregistered callers get an "Access denied" source error |
+| BASE | ⚠️ | ✅ (record-dependent) | ✅ (record-dependent) | Needs IP registration: the OAI-PMH endpoint answers "Access denied" to IPs not registered with Bielefeld University Library; the `all` preset lists it under `skipped`, name `base` explicitly to use it |
 | Zenodo | ✅ | ✅ (record-dependent) | ✅ (record-dependent) | Open API; reliable |
 | HAL | ✅ | ✅ (record-dependent) | ✅ (record-dependent) | Open API; reliable |
 | Jxiv | ✅ | ✅ | ✅ | Japanese preprints (OPS); keyless; `list_new_jxiv` harvests by date via OAI-PMH |
@@ -127,6 +127,8 @@ This matrix reflects **verified live-integration results** from functional and e
 | **ACM DL** | ✅ (Crossref metadata) | ⚠️ | ⚠️ | Keyless search; direct PDF/read may be blocked by browser challenges; use OA fallback |
 
 > ✅ = reliable in live tests.  ⚠️ = works but subject to upstream instability or access restrictions.  ❌ = not supported.  🔑 = key required.  🚧 = skeleton only.
+
+> arXiv, ChinaRxiv, Preprints.ru and CyberLeninka match only papers that contain every query word. When one of them returns nothing for a query of 3+ words, the unified search retries once without the last word and explains the empty result under `notes` (the retry's papers are not returned).
 
 ---
 
@@ -161,7 +163,7 @@ Some search failures are caused by external provider instability, not by bugs in
 | OpenAlex | `OpenAlex returned HTTP 429 (Retry-After: …)` in `errors` | Keyless daily budget (about 100 searches) spent; Retry-After is in seconds and can be hours | Set `PAPER_SEARCH_MCP_OPENALEX_API_KEY` |
 | CORE | 500 / timeout errors | Unauthenticated rate limiting | Set `PAPER_SEARCH_MCP_CORE_API_KEY` (free); connector retries with exponential backoff and falls back to key-less on 401/403 |
 | OpenAIRE | Transient 403 responses | IP-based session rate limiting | Connector retries 3× per profile, escalating: plain session → XML Accept header → raw `requests.get` with Mozilla UA |
-| CiteSeerX | 404 via web archive redirect | PSU endpoint intermittently redirects to archive | No workaround; reported as a source error |
+| CiteSeerX | 404 via web archive redirect | Service is retired; every call redirects to the Wayback Machine | No workaround; skipped under `all`, an explicit `citeseerx` request reports a source error |
 | BASE | `OAI-PMH error notOAIPMH: Access denied …` in `errors` | OAI-PMH endpoint requires institutional IP registration | Register at [base-search.net](https://www.base-search.net/about/en/) for API access |
 | SSRN full text | HTTP 403 or identity unavailable | Public page/PDF delivery may be restricted | Search uses OpenAlex; download reports failure without login, redirects or HTML search fallback |
 | PMC / Europe PMC | PDF download ProxyError | Local proxy blocking direct HTTPS PDF download | Disable proxy or use `download_with_fallback` instead |

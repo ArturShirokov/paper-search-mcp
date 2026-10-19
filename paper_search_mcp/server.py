@@ -46,8 +46,10 @@ from .academic_platforms.ssrn import SSRNSearcher
 from .academic_platforms.openreview import OpenReviewSearcher
 from .academic_platforms.unpaywall import UnpaywallResolver, UnpaywallSearcher
 from .academic_platforms.zenodo import ZenodoSearcher
+from .strict_query import strict_and_notes
 from .config import get_env, load_env_file
 from .search_cache import SearchCache, search_key
+from .source_skips import skipped_under_all
 
 # Initialize MCP server
 mcp = FastMCP("paper_search_server")
@@ -605,22 +607,22 @@ async def search_papers(
         year: Optional year filter for Semantic Scholar only.
     Returns:
         Aggregated dictionary with per-source stats, errors, skipped sources
-        (bioRxiv/medRxiv under 'all' when the query isn't a category, DOI or
-        date range), and deduplicated papers.
+        (under 'all': dblp, behind a bot wall; CiteSeerX, offline; BASE, which
+        refuses unregistered IPs; bioRxiv/medRxiv when the query
+        isn't a category, DOI or date range), notes (why a strict all-words
+        source returned nothing, and a shorter query that matches), and
+        deduplicated papers.
     """
     selected_sources = _parse_sources(sources)
     invalid_sources = _invalid_sources(sources)
     errors: Dict[str, str] = {
         source: "Unknown or unavailable source." for source in invalid_sources
     }
-    # Category-only sources would error on every keyword query under "all";
-    # report them as skipped. Naming them explicitly still surfaces the error.
+    # Under "all", report sources that can't answer as skipped instead of
+    # erroring. Naming them explicitly still surfaces the error.
     skipped: Dict[str, str] = {}
     if not sources or sources.strip().lower() == "all":
-        for name, searcher in (("biorxiv", biorxiv_searcher), ("medrxiv", medrxiv_searcher)):
-            reason = searcher.skip_reason(query)
-            if reason and name in selected_sources:
-                skipped[name] = reason
+        skipped = skipped_under_all(query, selected_sources)
         selected_sources = [source for source in selected_sources if source not in skipped]
 
     if not selected_sources:
@@ -728,6 +730,14 @@ async def search_papers(
 
     deduped_papers = _dedupe_papers(merged_papers)
 
+    # Every STRICT_AND_SOURCES name has a search_<name> tool in this module.
+    notes = await strict_and_notes(
+        query, source_results, errors,
+        lambda source, shorter: _run_search_with_timeout(
+            source, globals()[f"search_{source}"](shorter, max_results_per_source)
+        ),
+    )
+
     result = {
         "query": query,
         "sources_requested": sources,
@@ -740,6 +750,8 @@ async def search_papers(
     }
     if skipped:
         result["skipped"] = skipped
+    if notes:
+        result["notes"] = notes
     return result
 
 
@@ -2075,26 +2087,26 @@ async def download_ssrn(paper_id: str, save_path: str = "./downloads") -> str:
 
 @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
 async def read_openalex_paper(paper_id: str, save_path: str = "./downloads") -> str:
-    """Attempt to read and extract text content from an OpenAlex paper.
+    """Read the text of an OpenAlex work's open-access PDF.
 
     Args:
-        paper_id: OpenAlex paper ID.
+        paper_id: OpenAlex work ID (e.g. 'W7213893935') or DOI.
         save_path: Directory where the PDF is/will be saved (default: './downloads').
     Returns:
-        str: Message indicating that direct paper reading is not supported natively.
+        str: Extracted text. Raises when the work has no downloadable open-access PDF.
     """
     return openalex_searcher.read_paper(paper_id, save_path)
 
 
 @mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": True, "openWorldHint": True})
 async def download_openalex(paper_id: str, save_path: str = "./downloads") -> str:
-    """Download PDF for a paper from OpenAlex.
+    """Download an OpenAlex work's open-access PDF (best location first).
 
     Args:
-        paper_id: OpenAlex paper ID.
+        paper_id: OpenAlex work ID (e.g. 'W7213893935') or DOI.
         save_path: Directory to save the PDF (default: './downloads').
     Returns:
-        str: Error message, typically OpenAlex relies on extracted pdf_url instead of direct downloads.
+        str: Path to the saved PDF. Raises when no location yields a PDF of this work.
     """
     return await asyncio.to_thread(openalex_searcher.download_pdf, paper_id, save_path)
 

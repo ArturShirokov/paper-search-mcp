@@ -5,6 +5,7 @@ import re
 import time
 import tempfile
 from datetime import datetime
+from pathlib import Path
 from threading import Lock
 from typing import List
 from xml.etree import ElementTree
@@ -12,6 +13,11 @@ from xml.etree import ElementTree
 import feedparser
 import requests
 from pypdf import PdfReader
+
+try:
+    import fcntl
+except ImportError:  # Windows: no flock, keep in-process spacing only
+    fcntl = None
 
 from ..paper import Paper
 from ..utils import extract_doi
@@ -26,9 +32,9 @@ class ArxivSearcher(PaperSource):
 
     arXiv TOU requires no more than 1 request per 3 seconds with a single
     concurrent connection (https://info.arxiv.org/help/api/tou.html). A shared
-    lock and timestamp enforce that policy across all instances in this Python
-    process. Cross-process and cross-machine pacing remain the caller's
-    responsibility.
+    lock plus a locked timestamp file in the user cache dir enforce that policy
+    across instances and processes on this machine. Cross-machine pacing
+    remains the caller's responsibility.
     """
     BASE_URL = "https://export.arxiv.org/api/query"
     MIN_INTERVAL_SEC = 3.0  # arXiv TOU minimum
@@ -36,6 +42,10 @@ class ArxivSearcher(PaperSource):
     RETRYABLE_STATUS_CODES = frozenset((429, 500, 502, 503, 504))
     _request_lock = Lock()
     _last_request_at = 0.0
+    RATE_FILE = (
+        Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
+        / "paper-search-mcp" / "arxiv-rate"
+    )
     _FIELD_PREFIX_RE = re.compile(
         r"(?:^|\s)(ti|au|abs|co|jr|cat|rn|id|all|submittedDate|lastUpdatedDate):",
         re.IGNORECASE,
@@ -63,7 +73,30 @@ class ArxivSearcher(PaperSource):
 
     @classmethod
     def _pace_locked(cls):
-        """Pace a request while the process-wide request lock is held."""
+        """Pace a request while the process-wide request lock is held.
+
+        Spacing is shared across processes through ``RATE_FILE``; if that file
+        can't be used, fall back to spacing within this process.
+        """
+        if fcntl is not None:
+            try:
+                cls.RATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+                with open(cls.RATE_FILE, "a+") as rate_file:
+                    fcntl.flock(rate_file, fcntl.LOCK_EX)
+                    rate_file.seek(0)
+                    try:
+                        last = float(rate_file.read() or 0)
+                    except ValueError:
+                        last = 0.0
+                    wait = last + cls.MIN_INTERVAL_SEC - time.time()
+                    if wait > 0:
+                        # Cap the wait so a future timestamp can't stall searches.
+                        time.sleep(min(wait, cls.MIN_INTERVAL_SEC))
+                    rate_file.truncate(0)
+                    rate_file.write(repr(time.time()))
+                return
+            except OSError:
+                pass
         now = time.monotonic()
         elapsed = now - cls._last_request_at
         if cls._last_request_at > 0 and elapsed < cls.MIN_INTERVAL_SEC:
