@@ -161,6 +161,27 @@ def test_cmd_search_explicit_category_only_source_still_runs(monkeypatch, capsys
     searchers["biorxiv"].search.assert_called_once()
 
 
+def test_cmd_search_notes_shorter_query_for_empty_strict_and_source(monkeypatch, capsys):
+    searchers = install_searchers(monkeypatch, {"chinarxiv": []})
+    hit = Mock(to_dict=Mock(return_value=paper("c1")))
+    searchers["chinarxiv"].search.side_effect = (
+        lambda q, max_results: [hit] if q == "lunar water ice" else [])
+    args = cli.build_parser().parse_args(["search", "lunar water ice extraction", "-s", "chinarxiv"])
+    assert asyncio.run(cli.cmd_search(args)) == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["papers"] == []
+    assert "'lunar water ice'" in output["notes"]["chinarxiv"]
+
+
+def test_cmd_search_notes_strict_and_when_shorter_query_also_empty(monkeypatch, capsys):
+    searchers = install_searchers(monkeypatch, {"arxiv": []})
+    args = cli.build_parser().parse_args(["search", "lunar water ice extraction", "-s", "arxiv"])
+    assert asyncio.run(cli.cmd_search(args)) == 0
+    output = json.loads(capsys.readouterr().out)
+    assert searchers["arxiv"].search.call_count == 2
+    assert "every query word" in output["notes"]["arxiv"]
+
+
 def test_cmd_search_all_skips_blocked_dblp(monkeypatch, capsys):
     searchers = install_searchers(monkeypatch, {"arxiv": [], "dblp": []})
     args = cli.build_parser().parse_args(["search", "10.1038/s41593-020-0658-y"])

@@ -46,6 +46,7 @@ from .academic_platforms.ssrn import SSRNSearcher
 from .academic_platforms.openreview import OpenReviewSearcher
 from .academic_platforms.unpaywall import UnpaywallResolver, UnpaywallSearcher
 from .academic_platforms.zenodo import ZenodoSearcher
+from .strict_query import strict_and_notes
 from .config import get_env, load_env_file
 from .search_cache import SearchCache, search_key
 from .source_skips import skipped_under_all
@@ -607,7 +608,9 @@ async def search_papers(
     Returns:
         Aggregated dictionary with per-source stats, errors, skipped sources
         (under 'all': dblp, behind a bot wall; bioRxiv/medRxiv when the query
-        isn't a category, DOI or date range), and deduplicated papers.
+        isn't a category, DOI or date range), notes (why a strict all-words
+        source returned nothing, and a shorter query that matches), and
+        deduplicated papers.
     """
     selected_sources = _parse_sources(sources)
     invalid_sources = _invalid_sources(sources)
@@ -726,6 +729,19 @@ async def search_papers(
 
     deduped_papers = _dedupe_papers(merged_papers)
 
+    strict_searches = {
+        "arxiv": search_arxiv,
+        "chinarxiv": search_chinarxiv,
+        "preprints_ru": search_preprints_ru,
+        "cyberleninka": search_cyberleninka,
+    }
+    notes = await strict_and_notes(
+        query, source_results, errors,
+        lambda source, shorter: _run_search_with_timeout(
+            source, strict_searches[source](shorter, max_results_per_source)
+        ),
+    )
+
     result = {
         "query": query,
         "sources_requested": sources,
@@ -738,6 +754,8 @@ async def search_papers(
     }
     if skipped:
         result["skipped"] = skipped
+    if notes:
+        result["notes"] = notes
     return result
 
 

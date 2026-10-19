@@ -18,6 +18,7 @@ from typing import Any, Dict, List
 from .config import get_env
 from .source_skips import skipped_under_all
 from .tool_cli import cmd_tool
+from .strict_query import strict_and_notes
 from .academic_platforms.arxiv import ArxivSearcher
 from .academic_platforms.pubmed import PubMedSearcher
 from .academic_platforms.biorxiv import BioRxivSearcher
@@ -294,6 +295,15 @@ async def cmd_search(args: argparse.Namespace) -> int:
 
     deduped = _sort_papers(_dedupe(merged), getattr(args, "sort", "relevance"))
 
+    async def retry(src: str, shorter: str) -> List[Dict]:
+        if source_timeout is None:
+            return await _async_search(_get_searcher(src), shorter, args.max_results)
+        from .cli_search import search_sources
+        job = {"source": src, "query": shorter, "max_results": args.max_results, "kwargs": {}}
+        return (await search_sources([job], source_timeout))[0]
+
+    notes = await strict_and_notes(args.query, source_counts, errors, retry)
+
     output = {
         "query": args.query,
         "sources_used": names,
@@ -304,6 +314,8 @@ async def cmd_search(args: argparse.Namespace) -> int:
     }
     if skipped:
         output["skipped"] = skipped
+    if notes:
+        output["notes"] = notes
     print(json.dumps(output, indent=2, default=str))
     return 0
 
