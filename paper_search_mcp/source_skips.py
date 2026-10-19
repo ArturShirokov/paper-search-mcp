@@ -11,6 +11,8 @@ from .academic_platforms.medrxiv import MedRxivSearcher
 # Sources that can't answer at all right now: {name: reason}.
 SKIP_UNDER_ALL: dict[str, str] = {
     "dblp": "dblp API is behind a bot wall (Anubis proof-of-work page); name dblp explicitly to try it",
+    "citeseerx": "CiteSeerX service is retired (redirects to the Wayback Machine); name citeseerx explicitly to try it",
+    "base": "BASE API needs IP registration with Bielefeld University Library; name base explicitly to try it",
 }
 
 # Sources that can't answer some queries: {name: searcher with skip_reason(query)}.

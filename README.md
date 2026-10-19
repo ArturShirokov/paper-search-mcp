@@ -109,9 +109,9 @@ This matrix reflects **verified live-integration results** from functional and e
 | Europe PMC | ✅ | ✅ (OA) | ✅ (OA) | OA PDFs only; direct download may be blocked by some proxy environments |
 | dblp | ⚠️ | ❌ | ⚠️ info-only | API is behind a bot wall (Anubis proof-of-work); the `all` preset lists it under `skipped`, name `dblp` explicitly to try it |
 | OpenAIRE | ✅ | ❌ | ❌ | Open API; retries 3× with escalating request profiles on transient 403 |
-| CiteSeerX | ⚠️ | ✅ (record-dependent) | ⚠️ | API endpoint intermittently unavailable / redirects to web archive |
+| CiteSeerX | ❌ | ✅ (record-dependent) | ⚠️ | Offline: the service is retired and redirects to the Wayback Machine; the `all` preset lists it under `skipped`, name `citeseerx` explicitly to try it |
 | DOAJ | ✅ | ⚠️ (URL-dependent) | ⚠️ (URL-dependent) | PDF availability varies by article; free key raises rate limits |
-| BASE | ⚠️ | ✅ (record-dependent) | ✅ (record-dependent) | OAI-PMH endpoint requires institutional IP registration; unregistered callers get an "Access denied" source error |
+| BASE | ⚠️ | ✅ (record-dependent) | ✅ (record-dependent) | Needs IP registration: the OAI-PMH endpoint answers "Access denied" to IPs not registered with Bielefeld University Library; the `all` preset lists it under `skipped`, name `base` explicitly to use it |
 | Zenodo | ✅ | ✅ (record-dependent) | ✅ (record-dependent) | Open API; reliable |
 | HAL | ✅ | ✅ (record-dependent) | ✅ (record-dependent) | Open API; reliable |
 | Jxiv | ✅ | ✅ | ✅ | Japanese preprints (OPS); keyless; `list_new_jxiv` harvests by date via OAI-PMH |

@@ -48,8 +48,11 @@ def test_command_respects_sources(arguments, expected, query, monkeypatch, capsy
     output = json.loads(capsys.readouterr().out)
     fields = {"query", "sources_used", "source_results", "errors", "total", "papers"}
     if expected is cli.ALL_SOURCES:
-        # dblp is behind a bot wall; bioRxiv/medRxiv have no keyword search.
-        dropped = {"dblp", "biorxiv", "medrxiv"} if query == "machine learning" else {"dblp"}
+        # dblp is behind a bot wall, CiteSeerX is retired, BASE needs IP
+        # registration; bioRxiv/medRxiv have no keyword search.
+        dropped = {"dblp", "citeseerx", "base"}
+        if query == "machine learning":
+            dropped |= {"biorxiv", "medrxiv"}
         expected = [source for source in expected if source not in dropped]
         assert set(output.pop("skipped")) == dropped
     assert output["sources_used"] == expected
