@@ -103,11 +103,11 @@ This matrix reflects **verified live-integration results** from functional and e
 | IACR | ✅ | ✅ | ✅ | Open API; reliable |
 | Semantic Scholar | ✅ | ✅ (OA) | ✅ (OA) | Works without key (rate-limited); key improves limits; key rejection (403) retried automatically without key |
 | Crossref | ✅ | ❌ | ⚠️ info-only | Open API; reliable |
-| OpenAlex | ✅ | ❌ | ⚠️ info-only | Keyless budget is about 100 searches/day (1,000 credits, 10 per search); set `PAPER_SEARCH_MCP_OPENALEX_API_KEY` (free) for more |
+| OpenAlex | ✅ | ✅ (OA PDF links) | ✅ (OA PDF links) | Downloads the work's open-access PDF location, verified against its title. Keyless budget is about 100 searches/day (1,000 credits, 10 per search); set `PAPER_SEARCH_MCP_OPENALEX_API_KEY` (free) for more |
 | PMC | ✅ | ✅ (OA only) | ✅ (OA only) | OA PDFs only; direct download may be blocked by some proxy environments |
 | CORE | ✅ | ✅ (record-dependent) | ✅ (record-dependent) | Free key recommended; connector retries with backoff and falls back to key-less on 401/403 |
 | Europe PMC | ✅ | ✅ (OA) | ✅ (OA) | OA PDFs only; direct download may be blocked by some proxy environments |
-| dblp | ✅ | ❌ | ⚠️ info-only | Open API; reliable |
+| dblp | ⚠️ | ❌ | ⚠️ info-only | API is behind a bot wall (Anubis proof-of-work); the `all` preset lists it under `skipped`, name `dblp` explicitly to try it |
 | OpenAIRE | ✅ | ❌ | ❌ | Open API; retries 3× with escalating request profiles on transient 403 |
 | CiteSeerX | ⚠️ | ✅ (record-dependent) | ⚠️ | API endpoint intermittently unavailable / redirects to web archive |
 | DOAJ | ✅ | ⚠️ (URL-dependent) | ⚠️ (URL-dependent) | PDF availability varies by article; free key raises rate limits |

@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from .config import get_env
+from .source_skips import skipped_under_all
 from .tool_cli import cmd_tool
 from .strict_query import strict_and_notes
 from .academic_platforms.arxiv import ArxivSearcher
@@ -242,13 +243,10 @@ async def cmd_search(args: argparse.Namespace) -> int:
         print(json.dumps({"error": "No valid sources selected", "available": sorted(_available_sources())}))
         return 1
 
-    # Mirrors search_papers: under "all", skip category-only sources for keyword queries.
+    # Mirrors search_papers: under "all", skip sources that can't answer.
     skipped: Dict[str, str] = {}
     if (args.sources or "all").strip().lower() == "all":
-        for name, searcher_cls in (("biorxiv", BioRxivSearcher), ("medrxiv", MedRxivSearcher)):
-            reason = searcher_cls.skip_reason(args.query)
-            if reason and name in selected:
-                skipped[name] = reason
+        skipped = skipped_under_all(args.query, selected)
         selected = [src for src in selected if src not in skipped]
 
     tasks = {}
