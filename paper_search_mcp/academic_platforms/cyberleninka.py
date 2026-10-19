@@ -19,6 +19,7 @@ from typing import List, Optional
 
 from ..paper import Paper
 from .oaipmh import OAI_NS, OAIPMHSearcher
+from .ru_stems import matches_stems, query_stems
 
 BASE_URL = "https://cyberleninka.ru"
 ARTICLE_PREFIX = f"{BASE_URL}/article/n/"
@@ -46,17 +47,22 @@ class CyberLeninkaSearcher(OAIPMHSearcher):
         super().__init__(base_url=f"{BASE_URL}/oai")
 
     def search(self, query: str, max_results: int = 10, **kwargs) -> List[Paper]:
-        """Search CyberLeninka articles. Russian queries match far more records."""
-        size = max(1, min(max_results, self.MAX_PAGE_SIZE))
+        """Search CyberLeninka articles. Russian queries match far more records.
+
+        The site matches any query word, so a full page is fetched and only
+        hits whose title or abstract has every word (as a stem) are kept.
+        """
         response = self.session.post(
             self.SEARCH_URL,
-            json={"mode": "articles", "q": query, "size": size, "from": 0},
+            json={"mode": "articles", "q": query, "size": self.MAX_PAGE_SIZE, "from": 0},
             headers={"Accept": "application/json"},
             timeout=20,
         )
         response.raise_for_status()
         articles = response.json().get("articles") or []
-        return [self._parse_article(a) for a in articles if a.get("link")][:max_results]
+        stems = query_stems(query)
+        papers = [self._parse_article(a) for a in articles if a.get("link")]
+        return [p for p in papers if matches_stems(p, stems)][:max_results]
 
     def list_new(self, since: str, max_results: int = 100, **kwargs) -> List[Paper]:
         """List records added since a date (YYYY-MM-DD) via OAI-PMH.
