@@ -161,6 +161,19 @@ class TestStrictAndNotes(unittest.TestCase):
         self.assertIn("every query word", note)
         self.assertNotIn("'lunar water ice'", note)
 
+    def test_failed_retry_does_not_suggest_a_shorter_query(self):
+        def search(q, n):
+            if q != "lunar water ice extraction":
+                raise TimeoutError("timed out")
+            return []
+
+        chinarxiv = AsyncMock(side_effect=search)
+        with patch.object(server, "search_chinarxiv", new=chinarxiv):
+            result = asyncio.run(server.search_papers("lunar water ice extraction", sources="chinarxiv"))
+        note = result["notes"]["chinarxiv"]
+        self.assertIn("every query word", note)
+        self.assertNotIn("2-3 words", note)
+
     def test_two_word_query_gets_no_retry_or_note(self):
         result, chinarxiv = self._search({}, query="lunar ice")
         self.assertEqual(chinarxiv.await_count, 1)
